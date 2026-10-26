@@ -17,6 +17,11 @@ CONTROLS
                   move: S / D / F = up, Z = left, X = down, C = right
                   1 2 3 4 5 (or Q W E R T) = skill slots      I = info      P (or 0 / ;) = charge
                   Space or Tab/F1 = menu      Enter = confirm      Esc or Backspace = Back/cancel
+  Mouse         also: right button = Back.
+  Button hints: menus (title, save slots, in-game menu, world map) and NPC dialogue show a small pill with the buttons for the
+                input you used last: controller (D-pad / stick, A, B; PlayStation and Nintendo controllers get their own
+                button symbols), keyboard (arrows, Enter, Esc) or mouse (left / right button). It follows you as you switch
+                devices. --hints off hides it; --hints kb|pad|mouse forces one set.
   F11           fullscreen          F12   screenshot (PNG, next to the program)
   8-way movement: hold two directions (for example Up + Right, or push the stick diagonally) to walk diagonally. The game itself
   only understands one direction at a time, so the two directions are alternated on every game tick, and each step the game

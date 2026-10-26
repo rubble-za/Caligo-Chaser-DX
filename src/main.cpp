@@ -36,22 +36,47 @@ static int peekInt(const char* n);
 // Title-menu selection highlight (presentation only: drawn on a copy of the frame, so it never accumulates in the game's framebuffer).
 // g_nMenuIndex: 0 = New Game, 1 = Continue, 2 = Help. Layout is the game's fixed 800x480, scaled by gl::rs.
 static std::vector<uint32_t> g_presentTmp;
+static const ov::Bitmap* g_hintBm = nullptr;                                      // input-hint strip to show on this frame (null = none), see overlay.inc
+// The title menu is state 4, but for its first frames (g_nTitleToMainFra counting 0..10) the previous screen is still showing.
+static bool titleMenuShown() { return peekInt("nState") == 4 && peekInt("g_nTitleToMainFra") >= 10; }
+static int titleHighlightIndex() { if (!titleMenuShown()) return -1; int i = peekInt("g_nMenuIndex"); return i >= 0 && i <= 2 ? i : -1; }
 static const std::vector<uint32_t>& presentFb() {
     gl::ensureFb();
-    if (peekInt("nState") != 4) return gl::fb;
-    int idx = peekInt("g_nMenuIndex"); if (idx < 0 || idx > 2) return gl::fb;
-    static const int cy[3] = {220, 296, 368};
+    int idx = titleHighlightIndex(); bool hl = idx >= 0;
+    bool hint = g_hintBm && g_hintBm->x0 >= 0 && g_hintBm->x0 + g_hintBm->w <= gl::fbW && g_hintBm->y0 >= 0 && g_hintBm->y0 + g_hintBm->h <= gl::fbH;
+    if (!hl && !hint) return gl::fb;
     g_presentTmp = gl::fb; float rs = (float)gl::rs;
-    int x0 = (int)((630 - 150) * rs), x1 = (int)((630 + 150) * rs), y0 = (int)((cy[idx] - 27) * rs), y1 = (int)((cy[idx] + 27) * rs);
-    int bw = std::max(1, (int)(2 * rs));
-    for (int y = std::max(0, y0); y < std::min(gl::fbH, y1); y++) for (int x = std::max(0, x0); x < std::min(gl::fbW, x1); x++) {
-        uint32_t& px = g_presentTmp[(size_t)y * gl::fbW + x]; bool edge = x < x0 + bw || x >= x1 - bw || y < y0 + bw || y >= y1 - bw;
-        const int tr = 110, tg = 200, tb = 255; int a = edge ? 255 : 110;             // light blue, brighter border
-        int r = px & 255, g = (px >> 8) & 255, b = (px >> 16) & 255;                 // framebuffer is ABGR8888
-        r = (r * (255 - a) + tr * a) / 255; g = (g * (255 - a) + tg * a) / 255; b = (b * (255 - a) + tb * a) / 255;
-        px = 0xff000000u | (b << 16) | (g << 8) | r;
+    if (hl) {
+        static const int cy[3] = {220, 296, 368};
+        int x0 = (int)((630 - 150) * rs), x1 = (int)((630 + 150) * rs), y0 = (int)((cy[idx] - 27) * rs), y1 = (int)((cy[idx] + 27) * rs);
+        int bw = std::max(1, (int)(2 * rs));
+        for (int y = std::max(0, y0); y < std::min(gl::fbH, y1); y++) for (int x = std::max(0, x0); x < std::min(gl::fbW, x1); x++) {
+            uint32_t& px = g_presentTmp[(size_t)y * gl::fbW + x]; bool edge = x < x0 + bw || x >= x1 - bw || y < y0 + bw || y >= y1 - bw;
+            const int tr = 110, tg = 200, tb = 255; int a = edge ? 255 : 110;             // light blue, brighter border
+            int r = px & 255, g = (px >> 8) & 255, b = (px >> 16) & 255;                 // framebuffer is ABGR8888
+            r = (r * (255 - a) + tr * a) / 255; g = (g * (255 - a) + tg * a) / 255; b = (b * (255 - a) + tb * a) / 255;
+            px = 0xff000000u | (b << 16) | (g << 8) | r;
+        }
+    }
+    if (hint) for (int y = 0; y < g_hintBm->h; y++) for (int x = 0; x < g_hintBm->w; x++) {      // blend the hint pill into the frame (straight alpha over an opaque frame)
+        uint32_t s = g_hintBm->px[(size_t)y * g_hintBm->w + x], a = s >> 24; if (!a) continue;
+        uint32_t& d = g_presentTmp[(size_t)(g_hintBm->y0 + y) * gl::fbW + g_hintBm->x0 + x];
+        uint32_t r = ((s & 255) * a + (d & 255) * (255 - a)) / 255, g = ((s >> 8 & 255) * a + (d >> 8 & 255) * (255 - a)) / 255, b = ((s >> 16 & 255) * a + (d >> 16 & 255) * (255 - a)) / 255;
+        d = 0xff000000u | b << 16 | g << 8 | r;
     }
     return g_presentTmp;
+}
+// Input tracking for the hint strip: which device was used last, and what style of face buttons the controller has.
+static ov::Dev g_inDev = ov::KEYBOARD; static ov::Pad g_padStyle = ov::XBOX; static int g_hintsMode = -1;      // g_hintsMode: -1 automatic, -2 off, otherwise a forced ov::Dev
+static ov::Ctx hintCtx() {                                                       // which menu is showing (game state values found by watching the game)
+    int st = peekInt("nState");
+    if (st == 4) return titleMenuShown() ? ov::TITLE : ov::NONE; if (st == 6) return ov::SLOTS; if (st == 13) return ov::MENU;
+    if (st == 12) { if (peekInt("nGameMode") == 2) return ov::MAPSEL; auto it = g_exports.find("blnDialogActive"); uint8_t d = 0; if (it != g_exports.end()) rdbuf(it->second, &d, 1); if (d) return ov::DIALOG; }
+    return ov::NONE;
+}
+static const ov::Bitmap* currentHints() {
+    if (g_hintsMode == -2) return nullptr;
+    return ov::get(hintCtx(), g_hintsMode >= 0 ? (ov::Dev)g_hintsMode : g_inDev, g_padStyle, gl::fbW, gl::fbH);
 }
 static void hideMoreGames(uc_engine*, uint64_t, uint32_t, void*) { if (reg(R0) == 0x952 && peekInt("nState") == 4) setreg(PC, reg(LR)); }
 static bool g_noOnline = true;
@@ -273,6 +298,7 @@ static void usage() {
         "  --res WxH        render resolution, e.g. 1920x1080 (default 1600x960; use 800x480 for the original size on slower PCs; layout is kept, picture is rendered larger)\n"
         "  --four-way       original 4-way movement (diagonals are on by default: two held directions alternate frame by frame)\n"
         "  --no-diag-boost  diagonals at about 0.7 of the straight-line speed instead of full speed\n"
+        "  --hints <auto|off|kb|pad|mouse>   button hints at the bottom of menus (default auto: shows the input method you used last)\n"
         "  --soft           use the software renderer instead of the GPU (OpenGL) renderer\n"
         "  --no-strip-fix   turn off the repair of stray effect pixels left above the hotbar\n"
         "  --fps <n|auto>   frame rate limit: exact n without vsync, 0 = unlimited (default auto: about 60, vsync-aligned, e.g. 72 on a 144 Hz display)\n"
@@ -292,7 +318,8 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
+        else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
+        else if (a == "--hints") { std::string v = next(); g_hintsMode = v == "off" ? -2 : v == "kb" ? ov::KEYBOARD : v == "pad" ? ov::CONTROLLER : v == "mouse" ? ov::MOUSE : -1; }      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
@@ -411,7 +438,9 @@ int main(int argc, char** argv) {
               gameFrame(now); double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tf).count();
               if (slowMs > 0 && ms > slowMs) fprintf(stderr, "[slow] frame %d: %.1f ms (GL %.1f ms)\n", f, ms, (gl::drawSeconds - d0) * 1000); }
             if (const char* pk = getenv("CC_PEEK")) { if (f % 4 == 0) { uint32_t v[2] = {0, 0}; rdbuf(LIB_BASE + (uint32_t)strtoul(pk, nullptr, 16), v, 8); fprintf(stderr, "P %d %u %u\n", f, v[0], v[1]); } }
+            if (const char* wv = getenv("CC_WATCHVARS")) if (f % 10 == 0) { std::stringstream ss(wv); std::string nm; std::string line = "WV " + std::to_string(f) + " nState=" + std::to_string(peekInt("nState")); while (std::getline(ss, nm, ',')) line += " " + nm + "=" + std::to_string(peekInt(nm.c_str())); fprintf(stderr, "%s\n", line.c_str()); }   // dev: print these guest ints every 10 frames
             if (getenv("CC_WATCH") && f % 20 == 0) { static const char* nm[] = {"nState","nGameState","nGameMode","g_nSubState","nGameMsgType","blnDialogActive","blnSltDialog","blnPopupCurOn","blnPopupCurOn2"}; std::string s; for (auto n : nm) { auto it = g_exports.find(n); uint32_t v = 0; if (it != g_exports.end()) rdbuf(it->second, &v, 4); if (!strcmp(n, "g_nSubState")) v &= 255; s += std::string(n) + "=" + std::to_string((int)v) + " "; } fprintf(stderr, "W %d %s\n", f, s.c_str()); }
+            g_hintBm = currentHints();
             if (dumpEvery && f % dumpEvery == 0) { char b[512]; snprintf(b, sizeof b, "%s/frame_%05d.png", dumpDir.c_str(), f); savePng(b); }
         }
         fprintf(stderr, "raster: fast=%llu slow(persp=%llu gouraud=%llu env=%llu blend=%llu) fastPx=%llu slowPx=%llu\n", (unsigned long long)gl::fastTris, (unsigned long long)gl::slowPersp, (unsigned long long)gl::slowGouraud, (unsigned long long)gl::slowEnv, (unsigned long long)gl::slowBlend, (unsigned long long)gl::fastPixels, (unsigned long long)gl::slowPixels);
@@ -425,8 +454,12 @@ int main(int argc, char** argv) {
     { std::stringstream ss(inject); std::string it; while (std::getline(ss, it, ';')) { long long t; int a = 0, b = 0; char k[16]; if (sscanf(it.c_str(), "%lld:%15[a-z]:%d:%d", &t, k, &a, &b) >= 3) { inj.push_back({t, !strcmp(k, "key") ? 1 : !strcmp(k, "shot") ? 2 : !strcmp(k, "stall") ? 3 : !strcmp(k, "kd") ? 4 : !strcmp(k, "ku") ? 5 : !strcmp(k, "stick") ? 6 : 0, a, b, false}); } } }      // kd / ku = key down / key up (hold keys), stick = left stick position (x, y)
     bool running = true, paused = false; int pauseBGM = -1; int shot = 0; uint64_t frameCount = 0;
     SDL_GameController* pad = nullptr;
-    auto openPad = [&]() { if (pad) return; for (int i = 0; i < SDL_NumJoysticks(); i++) if (SDL_IsGameController(i)) { pad = SDL_GameControllerOpen(i); if (pad) { fprintf(stderr, "controller: %s\n", SDL_GameControllerName(pad)); break; } } };
-    SDL_GameControllerEventState(SDL_ENABLE); openPad(); 
+    auto openPad = [&]() { if (pad) return; for (int i = 0; i < SDL_NumJoysticks(); i++) if (SDL_IsGameController(i)) { pad = SDL_GameControllerOpen(i); if (pad) {
+        SDL_GameControllerType ty = SDL_GameControllerGetType(pad);                    // face-button style for the hint icons
+        g_padStyle = (ty == SDL_CONTROLLER_TYPE_PS3 || ty == SDL_CONTROLLER_TYPE_PS4 || ty == SDL_CONTROLLER_TYPE_PS5) ? ov::PLAYSTATION
+                   : (ty == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO || ty == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR) ? ov::SWITCH : ov::XBOX;
+        fprintf(stderr, "controller: %s\n", SDL_GameControllerName(pad)); break; } } };
+    SDL_GameControllerEventState(SDL_ENABLE); openPad(); if (pad) g_inDev = ov::CONTROLLER;
     auto releaseAllInput = [&](int64_t t) {
         if (g_touch.down) { g_touch.down = false; touchEvent(1, g_touch.x, g_touch.y, t); }
         inputReleaseAll(); lb = false; for (int& d : dpadSent) d = -1; stickDir = -1; stickV = -1;
@@ -458,9 +491,11 @@ int main(int argc, char** argv) {
             case SDL_CONTROLLERDEVICEADDED: openPad(); break;
             case SDL_CONTROLLERDEVICEREMOVED: if (pad && e.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad))) { releaseAllInput(now); SDL_GameControllerClose(pad); pad = nullptr; openPad(); } break;
             case SDL_CONTROLLERBUTTONDOWN: case SDL_CONTROLLERBUTTONUP: {
+                if (e.type == SDL_CONTROLLERBUTTONDOWN) g_inDev = ov::CONTROLLER;
                 padButton(e.cbutton.button, e.type == SDL_CONTROLLERBUTTONDOWN);
                 break; }
             case SDL_CONTROLLERAXISMOTION: {
+                if (abs((int)e.caxis.value) > 16000) g_inDev = ov::CONTROLLER;                  // a real push, not stick drift
                 if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {   // LT / RT = dash
                     int tl = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT), tr = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
                     static bool trig = false; bool want = std::max(tl, tr) > (trig ? 8000 : 16000);
@@ -472,12 +507,15 @@ int main(int argc, char** argv) {
             case SDL_KEYDOWN: case SDL_KEYUP: {
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F11) { Uint32 f = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP; SDL_SetWindowFullscreen(win, f ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP); break; }
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F12) { char b[64]; snprintf(b, sizeof b, "screenshot_%03d.png", shot++); savePng(b); fprintf(stderr, "saved %s\n", b); break; }
+                if (e.type == SDL_KEYDOWN) g_inDev = ov::KEYBOARD;
                 if (e.key.repeat) break;
                 if (e.key.keysym.scancode == SDL_SCANCODE_LSHIFT || e.key.keysym.scancode == SDL_SCANCODE_RSHIFT) { dashPress(e.type == SDL_KEYDOWN); break; }   // Shift = dash
                 int gk = gameKeyFromSdl(e.key.keysym.scancode); if (gk == -1) gk = gameKeyFromAndroid(androidKeyFromSdl(e.key.keysym.scancode));
                 inputKey(gk, e.type == SDL_KEYDOWN);
                 break; }
             case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP: case SDL_MOUSEMOTION: {
+                if (e.type == SDL_MOUSEMOTION ? abs(e.motion.xrel) + abs(e.motion.yrel) >= 4 : true) g_inDev = ov::MOUSE;      // clicks and real movement, not a resting cursor
+                if (e.type != SDL_MOUSEMOTION && e.button.button == SDL_BUTTON_RIGHT) { inputKey(73, e.type == SDL_MOUSEBUTTONDOWN); break; }   // right click = Back
                 if (e.type != SDL_MOUSEMOTION && e.button.button != SDL_BUTTON_LEFT) break;
                 int wx = e.type == SDL_MOUSEMOTION ? e.motion.x : e.button.x, wy = e.type == SDL_MOUSEMOTION ? e.motion.y : e.button.y;
                 float lx, ly; if (gl::hw::on) gl::hw::windowToLogical(wx, wy, lx, ly); else SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly); lx /= gl::rs; ly /= gl::rs;
@@ -488,7 +526,9 @@ int main(int argc, char** argv) {
             }
         }
         if (!paused) {
-            inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();            if (gl::hw::on) { int hi = peekInt("nState") == 4 ? peekInt("g_nMenuIndex") : -1; gl::hw::present(hi >= 0 && hi <= 2 ? hi : -1); }
+            inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();
+            g_hintBm = currentHints();
+            if (gl::hw::on) gl::hw::present(titleHighlightIndex(), g_hintBm);
             else {
                 SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
                 SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr); SDL_RenderPresent(ren);

@@ -112,7 +112,7 @@ static void windowToLogical(int wx, int wy, float& lx, float& ly) {      // wind
 }
 
 // Shows the offscreen frame in the window. hlIdx >= 0 draws the title-menu selection box (presentation only, never into the game's framebuffer).
-static void present(int hlIdx) {
+static void present(int hlIdx, const ov::Bitmap* ovb) {
     int dw, dh; SDL_GL_GetDrawableSize(win, &dw, &dh); if (dw < 1 || dh < 1) return;
     pBindFB(GL_FRAMEBUFFER, 0);
     glDisable(GL_SCISSOR_TEST); glViewport(0, 0, dw, dh); glClearColor(0, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
@@ -131,6 +131,18 @@ static void present(int hlIdx) {
         glColor4f(110 / 255.f, 200 / 255.f, 1.f, 110 / 255.f); rect(bx0, gb, bx1, gt);                                  // light-blue fill
         glColor4f(110 / 255.f, 200 / 255.f, 1.f, 1.f);                                                                  // brighter border
         rect(bx0, gt - bw, bx1, gt); rect(bx0, gb, bx1, gb + bw); rect(bx0, gb + bw, bx0 + bw, gt - bw); rect(bx1 - bw, gb + bw, bx1, gt - bw);
+    }
+    if (ovb && ovb->w > 0) {                                                         // input-hint strip along the bottom edge of the game area (overlay.inc)
+        static GLuint ovTex = 0; static int ovKey = -1;
+        if (!ovTex) glGenTextures(1, &ovTex);
+        glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, ovTex);
+        if (ovKey != ovb->key) {
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ovb->w, ovb->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, ovb->px.data()); ovKey = ovb->key;
+            texFilter(GL_TEXTURE_2D, true); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+        glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); glColor4f(1, 1, 1, 1);
+        float qx0 = ox + ovb->x0 * sc, qx1 = qx0 + ovb->w * sc, qtop = oy + (fbH - ovb->y0) * sc, qbot = qtop - ovb->h * sc;      // framebuffer y grows downwards, GL window y upwards
+        glBegin(GL_QUADS); glTexCoord2f(0, 1); glVertex2f(qx0, qbot); glTexCoord2f(1, 1); glVertex2f(qx1, qbot); glTexCoord2f(1, 0); glVertex2f(qx1, qtop); glTexCoord2f(0, 0); glVertex2f(qx0, qtop); glEnd();
     }
     SDL_GL_SwapWindow(win);
     pBindFB(GL_FRAMEBUFFER, fbo);

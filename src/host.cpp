@@ -356,6 +356,7 @@ static bool onMemInvalid(uc_engine*, uc_mem_type type, uint64_t addr, int size, 
 }
 
 #include "imports.inc"
+#include "overlay.inc"
 #include "gl_soft.inc"
 #include "apk.inc"
 #include "audio.inc"

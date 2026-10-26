@@ -33,7 +33,7 @@ static uint32_t callGuestNested(uint32_t fn, std::vector<uint32_t> args) {
 static bool g_stripFix = true, g_stripOn = false, g_stripArmed = false;       // g_stripOn: set each frame, only in the world (not menus / map select)
 static int64_t g_stripNow = 0, g_stripLearnUntil = 0;                          // game clock (ms) / end of the baseline-learning window
 static uint32_t g_texBase = 0, g_fbRow220 = 0;                                 // guest address of the game texture's pixels / of row 220 of the game's framebuffer
-static uint16_t g_stripOrig[2][384]; static bool g_stripDirty[2][384];
+static uint16_t g_stripOrig[2][384]; static bool g_stripDirty[2][384]; static int g_stripChanged = 0;       // pixels of rows 220-221 changed since the last copy
 static void stripWrite(uint32_t a, const uint8_t* nb, uint32_t n) {            // called before the guest's write of n bytes at a
     if (!g_fbRow220 || a >= g_fbRow220 + 2 * 768 || a + n <= g_fbRow220) return;
     bool learn = !g_stripOn || g_stripNow < g_stripLearnUntil;
@@ -43,6 +43,7 @@ static void stripWrite(uint32_t a, const uint8_t* nb, uint32_t n) {            /
         uint8_t cur[2], nw[2]; rdbuf(p, cur, 2); nw[0] = cur[0]; nw[1] = cur[1];
         for (uint32_t k = 0; k < 2; k++) if (p + k >= a && p + k < a + n) nw[k] = nb[p + k - a];
         if (nw[0] == cur[0] && nw[1] == cur[1]) continue;                       // same value redrawn: nothing changed
+        g_stripChanged++;
         if (learn) { g_stripDirty[row][x] = false; continue; }
         if (!g_stripDirty[row][x]) { g_stripOrig[row][x] = (uint16_t)(cur[0] | cur[1] << 8); g_stripDirty[row][x] = true; }
         else if ((uint16_t)(nw[0] | nw[1] << 8) == g_stripOrig[row][x]) g_stripDirty[row][x] = false;      // put back to the baseline value
@@ -51,7 +52,11 @@ static void stripWrite(uint32_t a, const uint8_t* nb, uint32_t n) {            /
 static void stripFlush(uint32_t d, uint32_t s, uint32_t n, std::vector<uint8_t>& b) {
     if (!g_stripFix || !g_texBase || n != 768 || d < g_texBase || (d - g_texBase) % 1024) return;
     uint32_t r = (d - g_texBase) / 1024; if (r != 220 && r != 221) return;
-    if (r == 220) g_fbRow220 = s;
+    if (r == 220) {
+        g_fbRow220 = s;
+        if (g_stripChanged > 150) { g_stripLearnUntil = g_stripNow + 1500; memset(g_stripDirty, 0, sizeof g_stripDirty); }   // a window / overlay redrew much of the two rows: that is interface, not stray pixels
+        g_stripChanged = 0;
+    }
     bool learn = !g_stripOn || g_stripNow < g_stripLearnUntil;
     for (int x = 0; x < 384; x++) {
         if (!g_stripDirty[r - 220][x]) continue;

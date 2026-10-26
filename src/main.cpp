@@ -240,13 +240,13 @@ static void usage() {
         "  --res WxH        render resolution, e.g. 1920x1080 (default 1600x960; use 800x480 for the original size on slower PCs; layout is kept, picture is rendered larger)\n"
         "  --soft           use the software renderer instead of the GPU (OpenGL) renderer\n"
         "  --no-strip-fix   turn off the repair of stray effect pixels left above the hotbar\n"
-        "  --fps <n>        frame rate limit (default 60, 0 = unlimited)\n"
+        "  --fps <n|auto>   frame rate limit: exact n without vsync, 0 = unlimited (default auto: about 60, vsync-aligned, e.g. 72 on a 144 Hz display)\n"
         "  --fullscreen     start fullscreen (F11 toggles, F12 saves a screenshot)\n"
         "Testing: --headless <frames> [--script \"400:tap:400:240;...\"] [--dump-every N --dump-dir D] [--trace]\n");
 }
 
 int main(int argc, char** argv) {
-    std::string apk, script, inject, dumpDir = "frames"; double runSeconds = 0; int headless = -1, dumpEvery = 0, scale = 1; bool fullscreen = false, softFlag = false, gpuFlag = false; int fpsCap = 60;
+    std::string apk, script, inject, dumpDir = "frames"; double runSeconds = 0; int headless = -1, dumpEvery = 0, scale = 1; bool fullscreen = false, softFlag = false, gpuFlag = false; int fpsCap = -1;                                                    // -1 = auto (see below)
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i]; auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
         if (a == "--apk") apk = next(); else if (a == "--data") g_dataRoot = next(); else if (a == "--save") g_saveRoot = next();
@@ -257,7 +257,7 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--fps") fpsCap = std::max(0, atoi(next().c_str())); else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
+        else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
@@ -285,9 +285,13 @@ int main(int argc, char** argv) {
     if (wantHw) {                                                  // GPU renderer: OpenGL window + offscreen framebuffer; falls back to software if anything is missing
         win = SDL_CreateWindow("Caligo Chaser", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags | SDL_WINDOW_OPENGL | (hl ? SDL_WINDOW_HIDDEN : 0));
         if (!win || !gl::hw::init(win)) { if (win) SDL_DestroyWindow(win); win = nullptr; fprintf(stderr, "GPU renderer unavailable, using the software renderer\n"); }
-        else if (fpsCap == 60) {                                   // a display refreshing at an exact multiple of 60 Hz paces the game by itself: swap every Nth vblank
-            SDL_DisplayMode dm; int di = SDL_GetWindowDisplayIndex(win);
-            if (di >= 0 && SDL_GetCurrentDisplayMode(di, &dm) == 0 && dm.refresh_rate >= 60 && dm.refresh_rate % 60 == 0) SDL_GL_SetSwapInterval(dm.refresh_rate / 60);
+        else {                                                      // pacing: vsync only paces evenly when the frame time is a whole number of display refreshes
+            SDL_DisplayMode dm; int di = SDL_GetWindowDisplayIndex(win), R = (di >= 0 && SDL_GetCurrentDisplayMode(di, &dm) == 0) ? dm.refresh_rate : 0;
+            if (fpsCap < 0) {                                       // auto: the vsync-aligned rate in 60..80 fps (144 Hz -> 72 fps, 120 Hz -> 60, 75 Hz -> 75), else an evenly timed 60
+                int n = 0; for (int k = 1; k <= 8 && R > 0; k++) if (R % k == 0 && R / k >= 60 && R / k <= 80) { n = k; break; }
+                if (n) { fpsCap = R / n; SDL_GL_SetSwapInterval(n); fprintf(stderr, "[gpu] %d Hz display: pacing at %d fps (every %s vblank)\n", R, fpsCap, n == 1 ? "" : (std::to_string(n) + "th").c_str()); }
+                else { fpsCap = 60; SDL_GL_SetSwapInterval(0); fprintf(stderr, "[gpu] %d Hz display: 60 fps limiter, vsync off for even pacing\n", R); }
+            } else if (fpsCap > 0) SDL_GL_SetSwapInterval(0);       // explicit --fps N: exact N with the limiter, no vsync
         }
     }
     if (!hl) {
@@ -305,6 +309,7 @@ int main(int argc, char** argv) {
         if (adev) { audio::devRate = have.freq; SDL_PauseAudioDevice(adev, 0); } else fprintf(stderr, "audio unavailable: %s\n", SDL_GetError());
     }
 
+    if (fpsCap < 0) fpsCap = 60;                                   // software renderer / fallback: plain 60 fps limiter
     bool lb = false; int dpadSent[4] = {-1,-1,-1,-1}; int stickDir = -1;
     auto padButton = [&](int b, bool dn) {
                 switch (b) {
@@ -353,7 +358,7 @@ int main(int argc, char** argv) {
             for (auto& pe : padEv) if (std::get<0>(pe) == f) padButton(std::get<1>(pe), std::get<2>(pe));
             gameFrame(now);
             if (const char* pk = getenv("CC_PEEK")) { if (f % 4 == 0) { uint32_t v[2] = {0, 0}; rdbuf(LIB_BASE + (uint32_t)strtoul(pk, nullptr, 16), v, 8); fprintf(stderr, "P %d %u %u\n", f, v[0], v[1]); } }
-            if (getenv("CC_WATCH") && f % 20 == 0) { static const char* nm[] = {"nState","nGameState","nGameMode","g_nSubState","nGameMsgType"}; std::string s; for (auto n : nm) { auto it = g_exports.find(n); uint32_t v = 0; if (it != g_exports.end()) rdbuf(it->second, &v, 4); if (!strcmp(n, "g_nSubState")) v &= 255; s += std::string(n) + "=" + std::to_string((int)v) + " "; } fprintf(stderr, "W %d %s\n", f, s.c_str()); }
+            if (getenv("CC_WATCH") && f % 20 == 0) { static const char* nm[] = {"nState","nGameState","nGameMode","g_nSubState","nGameMsgType","blnDialogActive","blnSltDialog","blnPopupCurOn","blnPopupCurOn2"}; std::string s; for (auto n : nm) { auto it = g_exports.find(n); uint32_t v = 0; if (it != g_exports.end()) rdbuf(it->second, &v, 4); if (!strcmp(n, "g_nSubState")) v &= 255; s += std::string(n) + "=" + std::to_string((int)v) + " "; } fprintf(stderr, "W %d %s\n", f, s.c_str()); }
             if (dumpEvery && f % dumpEvery == 0) { char b[512]; snprintf(b, sizeof b, "%s/frame_%05d.png", dumpDir.c_str(), f); savePng(b); }
         }
         fprintf(stderr, "raster: fast=%llu slow(persp=%llu gouraud=%llu env=%llu blend=%llu) fastPx=%llu slowPx=%llu\n", (unsigned long long)gl::fastTris, (unsigned long long)gl::slowPersp, (unsigned long long)gl::slowGouraud, (unsigned long long)gl::slowEnv, (unsigned long long)gl::slowBlend, (unsigned long long)gl::fastPixels, (unsigned long long)gl::slowPixels);

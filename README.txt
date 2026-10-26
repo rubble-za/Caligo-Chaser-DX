@@ -40,7 +40,10 @@ CONTROLS
   Renderer: the game is drawn on your graphics card through OpenGL. If OpenGL is not available the program says so and falls
   back to the built-in software renderer automatically (that one needs a fast CPU; --res 800x480 helps). --soft forces the
   software renderer.
-  Frame rate: limited to 60 fps, which is all the game's animation uses (--fps <n> changes it, --fps 0 removes the limit).
+  Frame rate: limited to about 60 fps, which is all the game's animation uses. By default the limit is chosen to match your
+  display: a rate between 60 and 80 that your refresh rate divides evenly (72 on a 144 Hz display, 60 on 60/120/240 Hz) so
+  frames are evenly spaced; otherwise an evenly timed 60. --fps <n> forces an exact rate (without vsync), --fps 0 removes
+  the limit, --fps auto restores the default.
   Stray effect pixels the original game leaves above the hotbar after low attacks are cleaned up automatically
   (--no-strip-fix turns that off).
 

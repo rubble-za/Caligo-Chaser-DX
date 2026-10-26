@@ -439,7 +439,12 @@ int main(int argc, char** argv) {
         if (!win) {
             win = SDL_CreateWindow("Caligo Chaser", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags);
             if (!win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return 1; }
+            #ifdef __ANDROID__
+            SDL_SetThreadPriority(SDL_THREAD_PRIORITY_TIME_CRITICAL);                            // the game thread must not be starved by background work
+            ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);                         // no vsync wait inside Present: it added up to 8 ms per frame on top of the game's 12 ms; the 60 fps limiter paces instead
+#else
             ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+#endif
             if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
             SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);
             SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gl::forceNearest ? "nearest" : "linear");   // read when the texture is created
@@ -599,7 +604,10 @@ int main(int argc, char** argv) {
                 static SDL_FingerID cur = -1; if (e.type == SDL_FINGERDOWN && cur == -1) cur = e.tfinger.fingerId; if (e.tfinger.fingerId != cur) break; if (e.type == SDL_FINGERUP) cur = -1;
                 int ww = 1, wh = 1; SDL_GetWindowSize(win, &ww, &wh); SDL_Event m{}; m.type = e.type == SDL_FINGERDOWN ? SDL_MOUSEBUTTONDOWN : e.type == SDL_FINGERUP ? SDL_MOUSEBUTTONUP : SDL_MOUSEMOTION;
                 int px = (int)(e.tfinger.x * ww), py = (int)(e.tfinger.y * wh);
-                { SDL_Rect db{}; if (SDL_GetDisplayBounds(0, &db) == 0 && db.w > ww) { float q = ww / (float)db.w; px = (int)(ww * .5f + (px - ww * .5f) * powf(q, 2.85f)); } }          // this phone reports finger positions across the full display width (cutout included) while the window is narrower: pull them back toward the centre by that ratio
+#ifdef __ANDROID__
+                if (e.type == SDL_FINGERDOWN) SDL_Log("finger raw x=%.4f y=%.4f window %dx%d", e.tfinger.x, e.tfinger.y, ww, wh);          // dev: touch calibration
+#endif
+                { SDL_Rect db{}; if (SDL_GetDisplayBounds(0, &db) == 0 && db.w > ww) { float q = ww / (float)db.w; px = (int)(ww * .5f + (px - ww * .5f) * powf(q, 3.2f)); } }          // this phone reports finger positions across the full display width (cutout included) while the window is narrower: pull them back toward the centre by that ratio
 
                 if (m.type == SDL_MOUSEMOTION) { m.motion.x = px; m.motion.y = py; m.motion.xrel = 99; } else { m.button.button = SDL_BUTTON_LEFT; m.button.x = px; m.button.y = py; }
                 SDL_PushEvent(&m); break; }
@@ -617,14 +625,32 @@ int main(int argc, char** argv) {
             }
         }
         if (!paused) {
+#ifdef __ANDROID__
+            Uint64 pc0 = SDL_GetPerformanceCounter(); double dr0 = gl::drawSeconds;
+#endif
             inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();
+#ifdef __ANDROID__
+            Uint64 pc1 = SDL_GetPerformanceCounter();
+#endif
             g_hintBm = currentHints();
             if (gl::hw::on) gl::hw::present(titleHighlightIndex(), g_hintBm);
             else {
                 SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
-                SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr);
+                SDL_SetRenderDrawColor(ren, 0, 0, 0, 255); SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr);
+#ifdef __ANDROID__
+                static Uint32 lastTouchMs = 0; if (g_touch.down) lastTouchMs = SDL_GetTicks();
+                if (lastTouchMs && SDL_GetTicks() - lastTouchMs < 2000) { int cx = (int)(g_touch.x * gl::rs), cy = (int)(g_touch.y * gl::rs); SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);    // dev: where the game thinks the finger is, kept for 2 s after lifting it
+                    for (int k = -1; k <= 1; k++) { SDL_RenderDrawLine(ren, cx - 120, cy + k, cx + 120, cy + k); SDL_RenderDrawLine(ren, cx + k, cy - 120, cx + k, cy + 120); } }
+#endif
                 SDL_RenderPresent(ren);
             }
+#ifdef __ANDROID__
+            {   // dev: every 120 frames: average ms in the game (of which GL drawing), ms presenting, slowest frame, and frames over 20 ms
+                static double aG = 0, aD = 0, aP = 0, mx = 0; static int n = 0, slow = 0; Uint64 pc2 = SDL_GetPerformanceCounter();
+                double g = (pc1 - pc0) * 1000.0 / perfFreq, p = (pc2 - pc1) * 1000.0 / perfFreq; aG += g; aP += p; aD += (gl::drawSeconds - dr0) * 1000.0; if (g + p > mx) mx = g + p; if (g + p > 20) slow++;
+                if (++n == 120) { SDL_Log("perf: game %.1f ms (draw %.1f), present %.1f ms, worst %.1f ms, %d slow", aG / n, aD / n, aP / n, mx, slow); aG = aD = aP = mx = 0; n = slow = 0; }
+            }
+#endif
             if (fpsCap > 0) {                                                       // frame limiter: sleep most of the remaining time, spin for the last millisecond
                 nextFrame += perfFreq / fpsCap; Uint64 nc = SDL_GetPerformanceCounter();
                 if (nc > nextFrame + perfFreq / 20) nextFrame = nc;                  // fell far behind (stall, window drag): don't try to catch up

@@ -21,3 +21,6 @@ cchost
 frames/
 *.png
 snap_*.bin
+
+# local working notes for Claude Code
+CLAUDE.md

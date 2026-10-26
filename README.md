@@ -30,6 +30,7 @@ See `README.txt` for the full controls and options.
 
 ## Building
 
+Windows (native, no installed compiler needed): `powershell -ExecutionPolicy Bypass -File build-windows.ps1`. It downloads llvm-mingw, CMake, Ninja and the libraries into `third_party\` and writes `build-win\CaligoChaser.exe`.
 Linux: `./build-linux.sh` (needs g++, cmake, ninja, git; fetches Unicorn, SDL2, miniz and stb).
 Windows (cross-compiled from Linux with llvm-mingw): `./build-windows-from-linux.sh`.
 

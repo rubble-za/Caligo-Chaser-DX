@@ -51,6 +51,11 @@ static int peekInt(const char* n);
 static std::vector<uint32_t> g_presentTmp;
 static const ov::Bitmap* g_hintBm = nullptr;                                      // input-hint strip to show on this frame (null = none), see overlay.inc
 // The title menu is state 4, but for its first frames (g_nTitleToMainFra counting 0..10) the previous screen is still showing.
+static std::map<uint32_t, uint64_t> g_profile;
+static void profileReport() {
+    std::vector<std::pair<uint64_t, uint32_t>> v; uint64_t tot = 0; for (auto& kv : g_profile) { v.push_back({kv.second, kv.first}); tot += kv.second; } std::sort(v.rbegin(), v.rend());
+    fprintf(stderr, "PROFILE total %llu\n", (unsigned long long)tot); for (size_t i = 0; i < v.size() && i < 400; i++) fprintf(stderr, "PROF %08x %llu\n", v[i].second, (unsigned long long)v[i].first);
+}
 static bool titleMenuShown() { return peekInt("nState") == 4 && peekInt("g_nTitleToMainFra") >= 10; }
 static int titleHighlightIndex() {
 #ifdef __ANDROID__
@@ -155,6 +160,7 @@ static void bootHost(const std::vector<uint8_t>& lib) {
     uc_hook h1, h2;
     UC_CHECK(uc_hook_add(g_uc, &h1, UC_HOOK_CODE, (void*)onCode, nullptr, STUB_BASE, STUB_BASE + STUB_SIZE - 1));
     UC_CHECK(uc_hook_add(g_uc, &h2, UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED | UC_HOOK_MEM_FETCH_UNMAPPED, (void*)onMemInvalid, nullptr, 1, 0));
+    if (getenv("CC_PROFILE")) { static uc_hook hp; UC_CHECK(uc_hook_add(g_uc, &hp, UC_HOOK_BLOCK, (void*)+[](uc_engine*, uint64_t a, uint32_t sz, void*) { g_profile[(uint32_t)(a - LIB_BASE)] += sz; }, nullptr, LIB_BASE, LIB_BASE + 0x400000)); }   // dev: CC_PROFILE=1 counts guest instructions (approx. bytes) per basic block; the top blocks are printed at the end of a headless run
     if (getenv("CC_HOOKVK")) { static uc_hook hv; UC_CHECK(uc_hook_add(g_uc, &hv, UC_HOOK_CODE, (void*)+[](uc_engine* uc, uint64_t, uint32_t, void*) { uint32_t a = 0, b = 0; uc_reg_read(uc, UC_ARM_REG_R0, &a); uc_reg_read(uc, UC_ARM_REG_R1, &b); fprintf(stderr, "[VK] GetGameVirtualTouchKey(%d, %d)\n", (int)a, (int)b); }, nullptr, LIB_BASE + 0x71a08, LIB_BASE + 0x71a08)); }   // dev: what the game passes to its on-screen-button hit test
     if (getenv("CC_WLOG") || getenv("CC_WADDR")) { static uc_hook hw; UC_CHECK(uc_hook_add(g_uc, &hw, UC_HOOK_MEM_WRITE, (void*)onMemWrite, nullptr, 1, 0)); }   // debug only: a global write hook makes every guest store call back into the host
     uint32_t ninit = loadLibMem(lib);
@@ -532,6 +538,7 @@ int main(int argc, char** argv) {
         }
         fprintf(stderr, "raster: fast=%llu slow(persp=%llu gouraud=%llu env=%llu blend=%llu) fastPx=%llu slowPx=%llu\n", (unsigned long long)gl::fastTris, (unsigned long long)gl::slowPersp, (unsigned long long)gl::slowGouraud, (unsigned long long)gl::slowEnv, (unsigned long long)gl::slowBlend, (unsigned long long)gl::fastPixels, (unsigned long long)gl::slowPixels);
         fprintf(stderr, "time in GL draw: %.2fs\n", gl::drawSeconds);
+        if (getenv("CC_PROFILE")) profileReport();
         fprintf(stderr, "headless run done: %d frames, %llu draw calls, %llu triangles\n", headless, (unsigned long long)gl::drawCalls, (unsigned long long)gl::trisDrawn);
         return 0;
     }

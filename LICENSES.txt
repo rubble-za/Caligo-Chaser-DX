@@ -2,7 +2,7 @@ This package contains NO game code or assets. The game is read at run time from 
 
 Components built into the executable:
   Unicorn Engine 2.1.3 ........ GPL-2.0   (CPU emulator; because it is linked in, the executable as a whole is GPL-2.0 and the
-                                           complete source of this host is provided in the "source" folder)
+                                           complete source of this host is in the GitHub repository Caligo-Chaser-PC-Port)
   SDL 2.30.9 .................. zlib
   miniz 3.0.2 ................. MIT
   stb_vorbis .................. public domain / MIT

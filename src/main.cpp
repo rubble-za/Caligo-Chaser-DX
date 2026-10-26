@@ -19,6 +19,15 @@ static bool savePng(const std::string& path) {
     fwrite(png, 1, len, f); fclose(f); mz_free(png); return true;
 }
 
+// dev: the game's own 384x256 framebuffer (what it draws before we scale it), from its texture copy; CC_GUESTFB=frame,frame saves guestfb_<frame>.png in headless runs
+static bool saveGuestFb(const std::string& path) {
+    for (auto& kv : gl::texs) { const gl::Tex& t = kv.second; if (t.w != 512 || t.h != 256 || t.px.empty()) continue;
+        std::vector<uint32_t> out(384 * 256); for (int y = 0; y < 256; y++) for (int x = 0; x < 384; x++) out[y * 384 + x] = t.px[(size_t)y * 512 + x] | 0xff000000u;
+        size_t len = 0; void* png = tdefl_write_image_to_png_file_in_memory(out.data(), 384, 256, 4, &len); if (!png) return false;
+        FILE* f = fopen(path.c_str(), "wb"); if (!f) { mz_free(png); return false; } fwrite(png, 1, len, f); fclose(f); mz_free(png); return true; }
+    return false;
+}
+
 // ---- boot: map memory, wire imports, load libgame.so, run constructors + JNI_OnLoad ----
 
 static bool g_wlog = false;
@@ -40,12 +49,37 @@ static const ov::Bitmap* g_hintBm = nullptr;                                    
 // The title menu is state 4, but for its first frames (g_nTitleToMainFra counting 0..10) the previous screen is still showing.
 static bool titleMenuShown() { return peekInt("nState") == 4 && peekInt("g_nTitleToMainFra") >= 10; }
 static int titleHighlightIndex() { if (!titleMenuShown()) return -1; int i = peekInt("g_nMenuIndex"); return i >= 0 && i <= 2 ? i : -1; }
+// Composed gameplay HUD in software (also used for screenshots): the same picture hw::present draws with OpenGL, built from the CPU copy of the game's texture. See hud.inc.
+static bool composeSoft(std::vector<uint32_t>& dst) {
+    const gl::Tex* gt = nullptr; for (auto& kv : gl::texs) if (kv.second.w == hud::TEX_W && kv.second.h == hud::NAT_H && !kv.second.px.empty()) { gt = &kv.second; break; }
+    if (!gt) return false;
+    const float rs = (float)gl::rs, gx0 = hud::natToDesignX((float)hud::SLOT_X0), gy0 = hud::natToDesignY((float)hud::SLOT_Y0);
+    dst.resize((size_t)gl::fbW * gl::fbH);
+    for (int y = 0; y < gl::fbH; y++) {
+        float dy = (y + .5f) / rs; int ny = std::min(hud::WORLD_ROWS - 1, (int)(dy * hud::WORLD_ROWS / 480.f));
+        for (int x = 0; x < gl::fbW; x++) {
+            float dx = (x + .5f) / rs; int nx = std::min(hud::NAT_W - 1, (int)(dx * hud::NAT_W / 800.f));
+            bool underFrames = ny >= hud::SLOT_Y0 && nx >= hud::SLOT_X0 && nx < hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_W;    // rows 216..219 there are the game's frame tops: repeat the clean row above
+            uint32_t px = gt->px[(size_t)(underFrames ? hud::SLOT_Y0 - 1 : ny) * hud::TEX_W + nx];
+            float sx = hud::SLOT_X0 + (dx - gx0) / hud::K, sy = hud::SLOT_Y0 + (dy - gy0) / hud::K;                  // position inside the cut-out group, in native pixels
+            if (sy >= hud::SLOT_Y0 && sx >= hud::SLOT_X0 && sx < hud::EXP_X1) {
+                int cx = (int)sx, cy = (int)sy, rel = (cx - hud::SLOT_X0) % hud::SLOT_PITCH, k = (cx - hud::SLOT_X0) / hud::SLOT_PITCH, row = cy - hud::SLOT_Y0;
+                bool slot = row < hud::SLOT_ROWS && k < hud::SLOTS && rel < hud::SLOT_W && rel >= hud::SIL_L[row] && rel <= hud::SIL_R[row];
+                bool exp = cy >= hud::EXP_Y0 && cy < hud::EXP_Y1 && cx >= hud::EXP_X0 && cx < hud::EXP_X1;
+                if (slot || exp) px = gt->px[(size_t)cy * hud::TEX_W + cx];
+            }
+            dst[(size_t)y * gl::fbW + x] = px | 0xff000000u;
+        }
+    }
+    return true;
+}
 static const std::vector<uint32_t>& presentFb() {
     gl::ensureFb();
-    int idx = titleHighlightIndex(); bool hl = idx >= 0;
+    int idx = titleHighlightIndex(); bool hl = idx >= 0, comp = hud::enabled && hud::active;
     bool hint = g_hintBm && g_hintBm->x0 >= 0 && g_hintBm->x0 + g_hintBm->w <= gl::fbW && g_hintBm->y0 >= 0 && g_hintBm->y0 + g_hintBm->h <= gl::fbH;
-    if (!hl && !hint) return gl::fb;
-    g_presentTmp = gl::fb; float rs = (float)gl::rs;
+    if (!hl && !hint && !comp) return gl::fb;
+    if (!(comp && composeSoft(g_presentTmp))) g_presentTmp = gl::fb;
+    float rs = (float)gl::rs;
     if (hl) {
         static const int cy[3] = {220, 296, 368};
         int x0 = (int)((630 - 150) * rs), x1 = (int)((630 + 150) * rs), y0 = (int)((cy[idx] - 27) * rs), y1 = (int)((cy[idx] + 27) * rs);
@@ -71,7 +105,11 @@ static ov::Dev g_inDev = ov::KEYBOARD; static ov::Pad g_padStyle = ov::XBOX; sta
 static ov::Ctx hintCtx() {                                                       // which menu is showing (game state values found by watching the game)
     int st = peekInt("nState");
     if (st == 4) return titleMenuShown() ? ov::TITLE : ov::NONE; if (st == 6) return ov::SLOTS; if (st == 13) return ov::MENU;
-    if (st == 12) { if (peekInt("nGameMode") == 2) return ov::MAPSEL; auto it = g_exports.find("blnDialogActive"); uint8_t d = 0; if (it != g_exports.end()) rdbuf(it->second, &d, 1); if (d) return ov::DIALOG; }
+    if (st == 12) {
+        if (peekInt("nGameMode") == 2) return ov::MAPSEL;
+        if (peekInt("nGameState") == 5) return ov::SHOP;                         // vendor shop: the world state's sub-state 5 (6 is the online shop)
+        auto it = g_exports.find("blnDialogActive"); uint8_t d = 0; if (it != g_exports.end()) rdbuf(it->second, &d, 1); if (d) return ov::DIALOG;
+    }
     return ov::NONE;
 }
 static const ov::Bitmap* currentHints() {
@@ -299,6 +337,7 @@ static void usage() {
         "  --four-way       original 4-way movement (diagonals are on by default: two held directions alternate frame by frame)\n"
         "  --no-diag-boost  diagonals at about 0.7 of the straight-line speed instead of full speed\n"
         "  --hints <auto|off|kb|pad|mouse>   button hints at the bottom of menus (default auto: shows the input method you used last)\n"
+        "  --classic-hud    keep the original gameplay layout (tan bar along the bottom) instead of the centred hotbar over a full-height world\n"
         "  --soft           use the software renderer instead of the GPU (OpenGL) renderer\n"
         "  --no-strip-fix   turn off the repair of stray effect pixels left above the hotbar\n"
         "  --fps <n|auto>   frame rate limit: exact n without vsync, 0 = unlimited (default auto: about 60, vsync-aligned, e.g. 72 on a 144 Hz display)\n"
@@ -318,7 +357,7 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
+        else if (a == "--classic-hud") hud::enabled = false; else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
         else if (a == "--hints") { std::string v = next(); g_hintsMode = v == "off" ? -2 : v == "kb" ? ov::KEYBOARD : v == "pad" ? ov::CONTROLLER : v == "mouse" ? ov::MOUSE : -1; }      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
@@ -440,7 +479,9 @@ int main(int argc, char** argv) {
             if (const char* pk = getenv("CC_PEEK")) { if (f % 4 == 0) { uint32_t v[2] = {0, 0}; rdbuf(LIB_BASE + (uint32_t)strtoul(pk, nullptr, 16), v, 8); fprintf(stderr, "P %d %u %u\n", f, v[0], v[1]); } }
             if (const char* wv = getenv("CC_WATCHVARS")) if (f % 10 == 0) { std::stringstream ss(wv); std::string nm; std::string line = "WV " + std::to_string(f) + " nState=" + std::to_string(peekInt("nState")); while (std::getline(ss, nm, ',')) line += " " + nm + "=" + std::to_string(peekInt(nm.c_str())); fprintf(stderr, "%s\n", line.c_str()); }   // dev: print these guest ints every 10 frames
             if (getenv("CC_WATCH") && f % 20 == 0) { static const char* nm[] = {"nState","nGameState","nGameMode","g_nSubState","nGameMsgType","blnDialogActive","blnSltDialog","blnPopupCurOn","blnPopupCurOn2"}; std::string s; for (auto n : nm) { auto it = g_exports.find(n); uint32_t v = 0; if (it != g_exports.end()) rdbuf(it->second, &v, 4); if (!strcmp(n, "g_nSubState")) v &= 255; s += std::string(n) + "=" + std::to_string((int)v) + " "; } fprintf(stderr, "W %d %s\n", f, s.c_str()); }
+            if (const char* fs = getenv("CC_FORCESTATE")) { int ff = 0, a = 0, b2 = 0; if (sscanf(fs, "%d:%d:%d", &ff, &a, &b2) == 3 && ff == f) { auto it = g_exports.find("SetCurrentState"); if (it != g_exports.end()) callGuest(it->second, {(uint32_t)a, (uint32_t)b2}); } }   // dev: CC_FORCESTATE=frame:state:subState calls the game's SetCurrentState
             g_hintBm = currentHints();
+            if (const char* gf = getenv("CC_GUESTFB")) { std::stringstream ss(gf); std::string tok; while (std::getline(ss, tok, ',')) if (atoi(tok.c_str()) == f) saveGuestFb("guestfb_" + tok + ".png"); }
             if (dumpEvery && f % dumpEvery == 0) { char b[512]; snprintf(b, sizeof b, "%s/frame_%05d.png", dumpDir.c_str(), f); savePng(b); }
         }
         fprintf(stderr, "raster: fast=%llu slow(persp=%llu gouraud=%llu env=%llu blend=%llu) fastPx=%llu slowPx=%llu\n", (unsigned long long)gl::fastTris, (unsigned long long)gl::slowPersp, (unsigned long long)gl::slowGouraud, (unsigned long long)gl::slowEnv, (unsigned long long)gl::slowBlend, (unsigned long long)gl::fastPixels, (unsigned long long)gl::slowPixels);
@@ -519,6 +560,7 @@ int main(int argc, char** argv) {
                 if (e.type != SDL_MOUSEMOTION && e.button.button != SDL_BUTTON_LEFT) break;
                 int wx = e.type == SDL_MOUSEMOTION ? e.motion.x : e.button.x, wy = e.type == SDL_MOUSEMOTION ? e.motion.y : e.button.y;
                 float lx, ly; if (gl::hw::on) gl::hw::windowToLogical(wx, wy, lx, ly); else SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly); lx /= gl::rs; ly /= gl::rs;
+                if (hud::enabled && hud::active) hud::unmapTouch(lx, ly);                // the gameplay HUD is re-laid-out: translate back to where the game expects things
                 if (e.type == SDL_MOUSEBUTTONDOWN) { g_touch.down = true; SDL_CaptureMouse(SDL_TRUE); touchEvent(0, lx, ly, now); }
                 else if (e.type == SDL_MOUSEBUTTONUP) { SDL_CaptureMouse(SDL_FALSE); if (g_touch.down) { g_touch.down = false; touchEvent(1, lx, ly, now); } }
                 else if (g_touch.down) touchEvent(2, lx, ly, now);

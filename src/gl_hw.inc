@@ -121,7 +121,32 @@ static void present(int hlIdx, const ov::Bitmap* ovb) {
     glDisable(GL_BLEND); glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, fboTex); texFilter(GL_TEXTURE_2D, !forceNearest);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE); glColor4f(1, 1, 1, 1);
     float x0 = ox, y0 = oy, x1 = ox + fbW * sc, y1 = oy + fbH * sc;
-    glBegin(GL_QUADS); glTexCoord2f(0, 0); glVertex2f(x0, y0); glTexCoord2f(1, 0); glVertex2f(x1, y0); glTexCoord2f(1, 1); glVertex2f(x1, y1); glTexCoord2f(0, 1); glVertex2f(x0, y1); glEnd();
+    Tex* gt = nullptr;                                                               // composed gameplay HUD (hud.inc): draw straight from the game's own 384x256 texture
+    if (hud::enabled && hud::active) for (auto& kv : texs) if (kv.second.w == hud::TEX_W && kv.second.h == hud::NAT_H && kv.second.glId) { gt = &kv.second; break; }
+    if (gt) {
+        glBindTexture(GL_TEXTURE_2D, gt->glId); texFilter(GL_TEXTURE_2D, !forceNearest);
+        float d2w = sc * rs;                                                         // 800x480 design pixels -> window pixels
+        auto X = [&](float dx) { return ox + dx * d2w; }; auto Y = [&](float dy) { return oy + (480.f - dy) * d2w; };      // design y grows downwards, GL window y upwards
+        auto quad = [&](float dx0, float dy0, float dx1, float dy1, float u0, float v0, float u1, float v1) {
+            glTexCoord2f(u0, v0); glVertex2f(X(dx0), Y(dy0)); glTexCoord2f(u1, v0); glVertex2f(X(dx1), Y(dy0)); glTexCoord2f(u1, v1); glVertex2f(X(dx1), Y(dy1)); glTexCoord2f(u0, v1); glVertex2f(X(dx0), Y(dy1)); };
+        const float tw = (float)hud::TEX_W, th = (float)hud::NAT_H;
+        glBegin(GL_QUADS);
+        // The world, stretched over the whole screen. Rows 216..219 hold the tops of the game's own slot frames at x 119..301 (the part of the world they cover is not
+        // available), so there the clean row above is repeated instead.
+        const float split = hud::SLOT_Y0 * 480.f / hud::WORLD_ROWS, xa = hud::SLOT_X0 * hud::K, xb = (hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_W) * hud::K;
+        const float ua = hud::SLOT_X0 / tw, ub = (hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_W) / tw, v216 = hud::SLOT_Y0 / th, v220 = hud::WORLD_ROWS / th, vrep = (hud::SLOT_Y0 - 0.5f) / th;
+        quad(0, 0, 800, split, 0, 0, hud::NAT_W / tw, v216);
+        quad(0, split, xa, 480, 0, v216, ua, v220); quad(xa, split, xb, 480, ua, vrep, ub, vrep); quad(xb, split, 800, 480, ub, v216, hud::NAT_W / tw, v220);
+        for (int k = 0; k < hud::SLOTS; k++) for (int i = 0; i < hud::SLOT_ROWS; i++) {   // the five slot frames, one row at a time so the rounded outline is exact
+            float nx0 = (float)(hud::SLOT_X0 + k * hud::SLOT_PITCH + hud::SIL_L[i]), nx1 = (float)(hud::SLOT_X0 + k * hud::SLOT_PITCH + hud::SIL_R[i] + 1), ny = (float)(hud::SLOT_Y0 + i);
+            quad(hud::natToDesignX(nx0), hud::natToDesignY(ny), hud::natToDesignX(nx1), hud::natToDesignY(ny + 1), nx0 / tw, ny / th, nx1 / tw, (ny + 1) / th); }
+        quad(hud::natToDesignX((float)hud::EXP_X0), hud::natToDesignY((float)hud::EXP_Y0), hud::natToDesignX((float)hud::EXP_X1), hud::natToDesignY((float)hud::EXP_Y1),       // the EXP label and bar underneath
+             hud::EXP_X0 / tw, hud::EXP_Y0 / th, hud::EXP_X1 / tw, hud::EXP_Y1 / th);
+        glEnd();
+        x0 = ox; y0 = oy;                                                            // (the highlight / overlay code below uses the plain game-area rectangle)
+    } else {
+        glBegin(GL_QUADS); glTexCoord2f(0, 0); glVertex2f(x0, y0); glTexCoord2f(1, 0); glVertex2f(x1, y0); glTexCoord2f(1, 1); glVertex2f(x1, y1); glTexCoord2f(0, 1); glVertex2f(x0, y1); glEnd();
+    }
     if (hlIdx >= 0 && hlIdx <= 2) {
         static const int cy[3] = {220, 296, 368};
         float bx0 = ox + (630 - 150) * rs * sc, bx1 = ox + (630 + 150) * rs * sc, byT = oy + (cy[hlIdx] - 27) * rs * sc, byB = oy + (cy[hlIdx] + 27) * rs * sc, bw = std::max(1.f, 2 * rs) * sc;
@@ -143,6 +168,12 @@ static void present(int hlIdx, const ov::Bitmap* ovb) {
         glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); glColor4f(1, 1, 1, 1);
         float qx0 = ox + ovb->x0 * sc, qx1 = qx0 + ovb->w * sc, qtop = oy + (fbH - ovb->y0) * sc, qbot = qtop - ovb->h * sc;      // framebuffer y grows downwards, GL window y upwards
         glBegin(GL_QUADS); glTexCoord2f(0, 1); glVertex2f(qx0, qbot); glTexCoord2f(1, 1); glVertex2f(qx1, qbot); glTexCoord2f(1, 0); glVertex2f(qx1, qtop); glTexCoord2f(0, 0); glVertex2f(qx0, qtop); glEnd();
+    }
+    if (const char* ws = getenv("CC_WINSHOT")) {                                     // dev: CC_WINSHOT=path.bmp saves what is in the window after 90 frames of composed gameplay HUD
+        static int n = 0; static bool done = false;
+        if (!done && hud::active && ++n == 90) { done = true; std::vector<uint8_t> px((size_t)dw * dh * 4); glReadBuffer(GL_BACK); glPixelStorei(GL_PACK_ALIGNMENT, 1); glReadPixels(0, 0, dw, dh, GL_BGRA, GL_UNSIGNED_BYTE, px.data());
+            FILE* f = fopen(ws, "wb"); if (f) { uint32_t sz = (uint32_t)(54 + px.size()), off = 54, hdr = 40, planes = 1 | 32 << 16, zero = 0; fwrite("BM", 1, 2, f); fwrite(&sz, 4, 1, f); fwrite(&zero, 4, 1, f); fwrite(&off, 4, 1, f); fwrite(&hdr, 4, 1, f);
+                fwrite(&dw, 4, 1, f); fwrite(&dh, 4, 1, f); fwrite(&planes, 4, 1, f); for (int i = 0; i < 6; i++) fwrite(&zero, 4, 1, f); fwrite(px.data(), 1, px.size(), f); fclose(f); } }
     }
     SDL_GL_SwapWindow(win);
     pBindFB(GL_FRAMEBUFFER, fbo);

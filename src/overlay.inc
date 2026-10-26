@@ -3,7 +3,7 @@
 // The font and every icon are generated here (5x7 pixel font, circles, keycaps), nothing is taken from the game.
 // Pixels are ABGR8888 with straight (non-premultiplied) alpha, like gl::fb, so the same bitmap serves the GPU and software presenters.
 namespace ov {
-enum Ctx { NONE, TITLE, SLOTS, MENU, DIALOG, MAPSEL };
+enum Ctx { NONE, TITLE, SLOTS, MENU, DIALOG, MAPSEL, SHOP };
 enum Dev { KEYBOARD, CONTROLLER, MOUSE };
 enum Pad { XBOX, PLAYSTATION, SWITCH };
 struct Bitmap { int w = 0, h = 0, key = -1, x0 = 0, y0 = 0; std::vector<uint32_t> px; };       // x0, y0: top-left corner in framebuffer pixels
@@ -106,7 +106,7 @@ static int drawIcon(Canvas& cv, int x, float cy, int icon, const char* label, Pa
 // The hint lists. Each entry is one action: up to two icons (for example D-pad + stick) and its label.
 struct Hint { int i1, i2; const char* key; const char* label; };
 static std::vector<Hint> hints(Ctx ctx, Dev dev) {
-    std::vector<Hint> h; bool move = ctx != DIALOG, back = ctx == SLOTS || ctx == MENU || ctx == MAPSEL || ctx == DIALOG;
+    std::vector<Hint> h; bool move = ctx != DIALOG, back = ctx == SLOTS || ctx == MENU || ctx == MAPSEL || ctx == DIALOG || ctx == SHOP;
     const char* ok = ctx == DIALOG ? "NEXT" : "SELECT", *bk = ctx == DIALOG ? "SKIP" : "BACK";       // in a conversation the game's Back key skips the rest of it
     if (dev == CONTROLLER) { if (move) h.push_back({I_DPAD, I_STICK, "", "MOVE"}); h.push_back({I_FACE_CONFIRM, 0, "", ok}); if (back) h.push_back({I_FACE_BACK, 0, "", bk}); }
     else if (dev == KEYBOARD) { if (move) h.push_back({I_KEY, 0, "ARROWS", "MOVE"}); h.push_back({I_KEY, 0, "ENTER", ok}); if (back) h.push_back({I_KEY, 0, "ESC", bk}); }
@@ -126,8 +126,8 @@ static const Bitmap* get(Ctx ctx, Dev dev, Pad pad, int fbW, int fbH) {
     int total = 0; for (size_t i = 0; i < hs.size(); i++) total += itemW(hs[i]) + (i ? (int)gap : 0);
     bm.w = std::min(fbW, total + 2 * (int)pad2); bm.h = H; bm.key = key; bm.px.assign((size_t)bm.w * H, 0);
     int margin = (int)lroundf(8 * s0);                                                          // bottom centre; the map screen has a text box at the bottom and a name box top right, so its pill sits under the "Mini Map" label
-    bm.x0 = ctx == MAPSEL ? margin : ctx == TITLE ? fbW - bm.w - margin : ctx == DIALOG ? fbW - bm.w - (int)lroundf(84 * s0) : (fbW - bm.w) / 2;     // title: its copyright line runs along the bottom left; dialogue: the game's own SKIP button is top left of the box and the OUT sign is far right
-    bm.y0 = ctx == MAPSEL ? (int)lroundf(46 * s0) : ctx == DIALOG ? (int)lroundf(326 * s0) : fbH - H - margin;     // dialogue: just above the text box (it starts at about y = 372 of 480), so it never covers the text
+    bm.x0 = ctx == MAPSEL ? margin : (ctx == TITLE || ctx == SHOP) ? fbW - bm.w - margin : ctx == DIALOG ? fbW - bm.w - (int)lroundf(84 * s0) : (fbW - bm.w) / 2;     // title: its copyright line runs along the bottom left; dialogue: the game's own SKIP button is top left of the box and the OUT sign is far right
+    bm.y0 = ctx == MAPSEL ? (int)lroundf(46 * s0) : ctx == DIALOG ? (int)lroundf(326 * s0) : ctx == SHOP ? (int)lroundf(358 * s0) : fbH - H - margin;     // dialogue: just above the text box (it starts at about y = 372 of 480), so it never covers the text; shop: bottom right, just above the bar (which starts at y = 405)
     Canvas cv{&bm, false, s, dry.tp};
     cv.rrect(0, 0, (float)bm.w, (float)H, H / 2.f, 0xff000000, 0.72f, std::max(1.f, s0), 0xff606060);   // translucent dark pill with a thin light edge
     int x = (bm.w - total) / 2;

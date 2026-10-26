@@ -441,9 +441,7 @@ int main(int argc, char** argv) {
             if (!win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return 1; }
             ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
             if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
-#ifndef __ANDROID__
-            SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);                                  // desktop: keep the game's 5:3 shape (letterbox); phone: stretch to the whole window
-#endif
+            SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);
             SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gl::forceNearest ? "nearest" : "linear");   // read when the texture is created
             tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, gl::fbW, gl::fbH);
         }
@@ -568,11 +566,7 @@ int main(int argc, char** argv) {
             case SDL_QUIT: running = false; break;
             case SDL_WINDOWEVENT:
                 if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESIZED || e.window.event == SDL_WINDOWEVENT_LEAVE || e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) releaseAllInput(now);
-                if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESTORED || e.window.event == SDL_WINDOWEVENT_EXPOSED) {
-#ifndef __ANDROID__
-                    if (ren) SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);                  // re-assert letterboxing after any size change
-#endif
-                }
+                if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESTORED || e.window.event == SDL_WINDOWEVENT_EXPOSED) { if (ren) SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH); }   // re-assert letterboxing after any size change
                 if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST && !paused) { paused = true; pauseBGM = snd::g_curBGM; snd::pause(pauseBGM); snd::stopCurrent(false); gamePause(); }
                 else if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && paused) { paused = false; snd::resume(pauseBGM); gameResume(); }
                 break;
@@ -605,7 +599,7 @@ int main(int argc, char** argv) {
                 static SDL_FingerID cur = -1; if (e.type == SDL_FINGERDOWN && cur == -1) cur = e.tfinger.fingerId; if (e.tfinger.fingerId != cur) break; if (e.type == SDL_FINGERUP) cur = -1;
                 int ww = 1, wh = 1; SDL_GetWindowSize(win, &ww, &wh); SDL_Event m{}; m.type = e.type == SDL_FINGERDOWN ? SDL_MOUSEBUTTONDOWN : e.type == SDL_FINGERUP ? SDL_MOUSEBUTTONUP : SDL_MOUSEMOTION;
                 int px = (int)(e.tfinger.x * ww), py = (int)(e.tfinger.y * wh);
-                { SDL_Rect db{}; static bool once = false; if (!once) { once = true; SDL_GetDisplayBounds(0, &db); SDL_Log("finger scale: window %dx%d, display %dx%d", ww, wh, db.w, db.h); } if (SDL_GetDisplayBounds(0, &db) == 0 && db.w > ww) { float q = ww / (float)db.w; px = (int)(ww * .5f + (px - ww * .5f) * powf(q, 2.85f)); } }          // this phone reports finger positions across the full display width (cutout included) while the window is narrower: pull them back toward the centre by that ratio
+                { SDL_Rect db{}; if (SDL_GetDisplayBounds(0, &db) == 0 && db.w > ww) { float q = ww / (float)db.w; px = (int)(ww * .5f + (px - ww * .5f) * powf(q, 2.85f)); } }          // this phone reports finger positions across the full display width (cutout included) while the window is narrower: pull them back toward the centre by that ratio
 
                 if (m.type == SDL_MOUSEMOTION) { m.motion.x = px; m.motion.y = py; m.motion.xrel = 99; } else { m.button.button = SDL_BUTTON_LEFT; m.button.x = px; m.button.y = py; }
                 SDL_PushEvent(&m); break; }
@@ -614,16 +608,7 @@ int main(int argc, char** argv) {
                 if (e.type != SDL_MOUSEMOTION && e.button.button == SDL_BUTTON_RIGHT) { inputKey(73, e.type == SDL_MOUSEBUTTONDOWN); break; }   // right click = Back
                 if (e.type != SDL_MOUSEMOTION && e.button.button != SDL_BUTTON_LEFT) break;
                 int wx = e.type == SDL_MOUSEMOTION ? e.motion.x : e.button.x, wy = e.type == SDL_MOUSEMOTION ? e.motion.y : e.button.y;
-                float lx, ly;
-#ifdef __ANDROID__
-                { int ww = 1, wh = 1; SDL_GetWindowSize(win, &ww, &wh); lx = wx * (float)gl::fbW / ww; ly = wy * (float)gl::fbH / wh; }
-#else
-                if (gl::hw::on) gl::hw::windowToLogical(wx, wy, lx, ly); else SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly);
-#endif
-                lx /= gl::rs; ly /= gl::rs;
-#ifdef __ANDROID__
-                { int ow = 0, oh = 0, ww2 = 0, wh2 = 0; SDL_GetRendererOutputSize(ren, &ow, &oh); SDL_GetWindowSize(win, &ww2, &wh2); SDL_Log("touch ev=%d win=%d,%d (window %dx%d, output %dx%d) logical=%.0f,%.0f rs=%.1f", (int)e.type, wx, wy, ww2, wh2, ow, oh, lx, ly, (float)gl::rs); }
-#endif
+                float lx, ly; if (gl::hw::on) gl::hw::windowToLogical(wx, wy, lx, ly); else SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly); lx /= gl::rs; ly /= gl::rs;
                 if (hud::enabled && hud::active) hud::unmapTouch(lx, ly);                // the gameplay HUD is re-laid-out: translate back to where the game expects things
                 if (e.type == SDL_MOUSEBUTTONDOWN) { g_touch.down = true; SDL_CaptureMouse(SDL_TRUE); touchEvent(0, lx, ly, now); }
                 else if (e.type == SDL_MOUSEBUTTONUP) { SDL_CaptureMouse(SDL_FALSE); if (g_touch.down) { g_touch.down = false; touchEvent(1, lx, ly, now); } }
@@ -632,24 +617,14 @@ int main(int argc, char** argv) {
             }
         }
         if (!paused) {
-            Uint64 pc0 = SDL_GetPerformanceCounter();
             inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();
-#ifdef __ANDROID__
-            static double accG = 0, accP = 0; static int accN = 0; Uint64 pc1 = SDL_GetPerformanceCounter(); accG += (double)(pc1 - pc0) * 1000.0 / perfFreq;
-#endif
             g_hintBm = currentHints();
             if (gl::hw::on) gl::hw::present(titleHighlightIndex(), g_hintBm);
             else {
                 SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
                 SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr);
-#ifdef __ANDROID__
-                if (g_touch.down) { SDL_SetRenderDrawColor(ren, 255, 0, 0, 255); int ow = 1, oh = 1; SDL_GetRendererOutputSize(ren, &ow, &oh); int cx = (int)(g_touch.x * ow / 800.f), cy = (int)(g_touch.y * oh / 480.f); SDL_RenderDrawLine(ren, cx - 20, cy, cx + 20, cy); SDL_RenderDrawLine(ren, cx, cy - 20, cx, cy + 20); }   // debug: where the game thinks the finger is
-#endif
                 SDL_RenderPresent(ren);
             }
-#ifdef __ANDROID__
-            { Uint64 pc2 = SDL_GetPerformanceCounter(); accP += (double)(pc2 - pc1) * 1000.0 / perfFreq; if (++accN == 120) { SDL_Log("perf: game %.1f ms, present %.1f ms per frame (%d fps cap)", accG / 120, accP / 120, fpsCap); accG = accP = 0; accN = 0; } }
-#endif
             if (fpsCap > 0) {                                                       // frame limiter: sleep most of the remaining time, spin for the last millisecond
                 nextFrame += perfFreq / fpsCap; Uint64 nc = SDL_GetPerformanceCounter();
                 if (nc > nextFrame + perfFreq / 20) nextFrame = nc;                  // fell far behind (stall, window drag): don't try to catch up

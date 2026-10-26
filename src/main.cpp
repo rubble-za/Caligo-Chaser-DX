@@ -155,6 +155,7 @@ static void bootHost(const std::vector<uint8_t>& lib) {
     uc_hook h1, h2;
     UC_CHECK(uc_hook_add(g_uc, &h1, UC_HOOK_CODE, (void*)onCode, nullptr, STUB_BASE, STUB_BASE + STUB_SIZE - 1));
     UC_CHECK(uc_hook_add(g_uc, &h2, UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED | UC_HOOK_MEM_FETCH_UNMAPPED, (void*)onMemInvalid, nullptr, 1, 0));
+    if (getenv("CC_HOOKVK")) { static uc_hook hv; UC_CHECK(uc_hook_add(g_uc, &hv, UC_HOOK_CODE, (void*)+[](uc_engine* uc, uint64_t, uint32_t, void*) { uint32_t a = 0, b = 0; uc_reg_read(uc, UC_ARM_REG_R0, &a); uc_reg_read(uc, UC_ARM_REG_R1, &b); fprintf(stderr, "[VK] GetGameVirtualTouchKey(%d, %d)\n", (int)a, (int)b); }, nullptr, LIB_BASE + 0x71a08, LIB_BASE + 0x71a08)); }   // dev: what the game passes to its on-screen-button hit test
     if (getenv("CC_WLOG") || getenv("CC_WADDR")) { static uc_hook hw; UC_CHECK(uc_hook_add(g_uc, &hw, UC_HOOK_MEM_WRITE, (void*)onMemWrite, nullptr, 1, 0)); }   // debug only: a global write hook makes every guest store call back into the host
     uint32_t ninit = loadLibMem(lib);
     for (uint32_t i = 0; i < ninit; i++) callGuest(g_exports["__init_" + std::to_string(i)]);
@@ -440,7 +441,9 @@ int main(int argc, char** argv) {
             if (!win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return 1; }
             ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
             if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
-            SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);
+#ifndef __ANDROID__
+            SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);                                  // desktop: keep the game's 5:3 shape (letterbox); phone: stretch to the whole window
+#endif
             SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gl::forceNearest ? "nearest" : "linear");   // read when the texture is created
             tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, gl::fbW, gl::fbH);
         }
@@ -515,6 +518,7 @@ int main(int argc, char** argv) {
             { static const double slowMs = getenv("CC_SLOWFRAMES") ? atof(getenv("CC_SLOWFRAMES")) : 0; auto tf = std::chrono::steady_clock::now(); double d0 = gl::drawSeconds;   // dev: CC_SLOWFRAMES=ms lists frames slower than that
               gameFrame(now); double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tf).count();
               if (slowMs > 0 && ms > slowMs) fprintf(stderr, "[slow] frame %d: %.1f ms (GL %.1f ms)\n", f, ms, (gl::drawSeconds - d0) * 1000); }
+            if (const char* pv = getenv("CC_PROBEVK")) if (f == atoi(pv)) { auto it = g_exports.find("GetGameVirtualTouchKey"); if (it != g_exports.end()) for (int y = 0; y < 480; y += 16) { std::string row; for (int x = 0; x < 800; x += 8) { int k = (int)callGuest(it->second, {(uint32_t)x, (uint32_t)y}); row += k == 0xffff || k == -1 || k == 62 && false ? '.' : (char)('A' + (k & 15)); } fprintf(stderr, "VK y=%3d %s\n", y, row.c_str()); } }   // dev: CC_PROBEVK=frame prints the game's on-screen button hit map (800x480, one cell = 8x16 px)
             if (const char* pk = getenv("CC_PEEK")) { if (f % 4 == 0) { uint32_t v[2] = {0, 0}; rdbuf(LIB_BASE + (uint32_t)strtoul(pk, nullptr, 16), v, 8); fprintf(stderr, "P %d %u %u\n", f, v[0], v[1]); } }
             if (const char* wv = getenv("CC_WATCHVARS")) if (f % 10 == 0) { std::stringstream ss(wv); std::string nm; std::string line = "WV " + std::to_string(f) + " nState=" + std::to_string(peekInt("nState")); while (std::getline(ss, nm, ',')) line += " " + nm + "=" + std::to_string(peekInt(nm.c_str())); fprintf(stderr, "%s\n", line.c_str()); }   // dev: print these guest ints every 10 frames
             if (getenv("CC_WATCH") && f % 20 == 0) { static const char* nm[] = {"nState","nGameState","nGameMode","g_nSubState","nGameMsgType","blnDialogActive","blnSltDialog","blnPopupCurOn","blnPopupCurOn2"}; std::string s; for (auto n : nm) { auto it = g_exports.find(n); uint32_t v = 0; if (it != g_exports.end()) rdbuf(it->second, &v, 4); if (!strcmp(n, "g_nSubState")) v &= 255; s += std::string(n) + "=" + std::to_string((int)v) + " "; } fprintf(stderr, "W %d %s\n", f, s.c_str()); }
@@ -564,7 +568,11 @@ int main(int argc, char** argv) {
             case SDL_QUIT: running = false; break;
             case SDL_WINDOWEVENT:
                 if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESIZED || e.window.event == SDL_WINDOWEVENT_LEAVE || e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) releaseAllInput(now);
-                if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESTORED || e.window.event == SDL_WINDOWEVENT_EXPOSED) { if (ren) SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH); }   // re-assert letterboxing after any size change
+                if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESTORED || e.window.event == SDL_WINDOWEVENT_EXPOSED) {
+#ifndef __ANDROID__
+                    if (ren) SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);                  // re-assert letterboxing after any size change
+#endif
+                }
                 if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST && !paused) { paused = true; pauseBGM = snd::g_curBGM; snd::pause(pauseBGM); snd::stopCurrent(false); gamePause(); }
                 else if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && paused) { paused = false; snd::resume(pauseBGM); gameResume(); }
                 break;
@@ -597,6 +605,8 @@ int main(int argc, char** argv) {
                 static SDL_FingerID cur = -1; if (e.type == SDL_FINGERDOWN && cur == -1) cur = e.tfinger.fingerId; if (e.tfinger.fingerId != cur) break; if (e.type == SDL_FINGERUP) cur = -1;
                 int ww = 1, wh = 1; SDL_GetWindowSize(win, &ww, &wh); SDL_Event m{}; m.type = e.type == SDL_FINGERDOWN ? SDL_MOUSEBUTTONDOWN : e.type == SDL_FINGERUP ? SDL_MOUSEBUTTONUP : SDL_MOUSEMOTION;
                 int px = (int)(e.tfinger.x * ww), py = (int)(e.tfinger.y * wh);
+                { SDL_Rect db{}; static bool once = false; if (!once) { once = true; SDL_GetDisplayBounds(0, &db); SDL_Log("finger scale: window %dx%d, display %dx%d", ww, wh, db.w, db.h); } if (SDL_GetDisplayBounds(0, &db) == 0 && db.w > ww) { float q = ww / (float)db.w; px = (int)(ww * .5f + (px - ww * .5f) * powf(q, 2.85f)); } }          // this phone reports finger positions across the full display width (cutout included) while the window is narrower: pull them back toward the centre by that ratio
+
                 if (m.type == SDL_MOUSEMOTION) { m.motion.x = px; m.motion.y = py; m.motion.xrel = 99; } else { m.button.button = SDL_BUTTON_LEFT; m.button.x = px; m.button.y = py; }
                 SDL_PushEvent(&m); break; }
             case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP: case SDL_MOUSEMOTION: {
@@ -604,7 +614,13 @@ int main(int argc, char** argv) {
                 if (e.type != SDL_MOUSEMOTION && e.button.button == SDL_BUTTON_RIGHT) { inputKey(73, e.type == SDL_MOUSEBUTTONDOWN); break; }   // right click = Back
                 if (e.type != SDL_MOUSEMOTION && e.button.button != SDL_BUTTON_LEFT) break;
                 int wx = e.type == SDL_MOUSEMOTION ? e.motion.x : e.button.x, wy = e.type == SDL_MOUSEMOTION ? e.motion.y : e.button.y;
-                float lx, ly; if (gl::hw::on) gl::hw::windowToLogical(wx, wy, lx, ly); else SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly); lx /= gl::rs; ly /= gl::rs;
+                float lx, ly;
+#ifdef __ANDROID__
+                { int ww = 1, wh = 1; SDL_GetWindowSize(win, &ww, &wh); lx = wx * (float)gl::fbW / ww; ly = wy * (float)gl::fbH / wh; }
+#else
+                if (gl::hw::on) gl::hw::windowToLogical(wx, wy, lx, ly); else SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly);
+#endif
+                lx /= gl::rs; ly /= gl::rs;
 #ifdef __ANDROID__
                 { int ow = 0, oh = 0, ww2 = 0, wh2 = 0; SDL_GetRendererOutputSize(ren, &ow, &oh); SDL_GetWindowSize(win, &ww2, &wh2); SDL_Log("touch ev=%d win=%d,%d (window %dx%d, output %dx%d) logical=%.0f,%.0f rs=%.1f", (int)e.type, wx, wy, ww2, wh2, ow, oh, lx, ly, (float)gl::rs); }
 #endif
@@ -625,7 +641,11 @@ int main(int argc, char** argv) {
             if (gl::hw::on) gl::hw::present(titleHighlightIndex(), g_hintBm);
             else {
                 SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
-                SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr); SDL_RenderPresent(ren);
+                SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr);
+#ifdef __ANDROID__
+                if (g_touch.down) { SDL_SetRenderDrawColor(ren, 255, 0, 0, 255); int ow = 1, oh = 1; SDL_GetRendererOutputSize(ren, &ow, &oh); int cx = (int)(g_touch.x * ow / 800.f), cy = (int)(g_touch.y * oh / 480.f); SDL_RenderDrawLine(ren, cx - 20, cy, cx + 20, cy); SDL_RenderDrawLine(ren, cx, cy - 20, cx, cy + 20); }   // debug: where the game thinks the finger is
+#endif
+                SDL_RenderPresent(ren);
             }
 #ifdef __ANDROID__
             { Uint64 pc2 = SDL_GetPerformanceCounter(); accP += (double)(pc2 - pc1) * 1000.0 / perfFreq; if (++accN == 120) { SDL_Log("perf: game %.1f ms, present %.1f ms per frame (%d fps cap)", accG / 120, accP / 120, fpsCap); accG = accP = 0; accN = 0; } }

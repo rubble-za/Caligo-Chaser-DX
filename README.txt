@@ -37,10 +37,12 @@ CONTROLS (phase 2)
   --aim-follow (experimental, off by default) restarts an attack when you change direction while holding the action button.
   SAVES: slots are written as hero_data_N / game_data_N in the save folder. Earlier builds corrupted these on Windows
   (text-mode file writes), so saves made with builds before phase 2d must be made again.
-  Sharper pixels: --filter nearest (best with whole-number scales such as --res 1600x960 or 2400x1440).
+  Pixel filtering: nearest-neighbour (hard, crisp pixels) is the default. It looks best at whole-number scales such as
+  --res 1600x960 or 2400x1440; at other window sizes some pixel rows/columns can look slightly uneven.
+  --filter smooth brings back the original bilinear (soft) look.
   Resolution: CaligoChaser.exe --res 1920x1080   renders the game larger (layout is unchanged, picture is sharper and the
   window is letter-boxed to the game's 5:3 shape). Needs a fast CPU: the renderer is software-based. Default is 800x480.
-  Smooth scaling is on; set the environment variable CC_NEAREST=1 for hard pixels. CC_DEBUG_STATE=1 logs state/input.
+  CC_DEBUG_STATE=1 logs state/input.
   A mouse/keyboard/controller-friendly menu layer is still to come.
 
 SAVES

@@ -217,7 +217,7 @@ static void usage() {
         "  --scale <n>      initial window scale (default 1)\n"
         "  --aim-follow     (experimental) restart an attack when you change direction while holding the action button\n"
         "  --touch-ui       keep the on-screen d-pad and action buttons (hidden by default)\n"
-        "  --filter nearest|smooth   texture filtering (default smooth; nearest = crisp pixels, best at --res 1600x960 / 2400x1440)\n"
+        "  --filter nearest|smooth   texture filtering (default nearest = crisp pixels, best at --res 1600x960 / 2400x1440; smooth = bilinear)\n"
         "  --res WxH        render resolution, e.g. 1920x1080 (default 800x480; layout is kept, picture is rendered larger)\n"
         "  --fullscreen     start fullscreen (F11 toggles, F12 saves a screenshot)\n"
         "Testing: --headless <frames> [--script \"400:tap:400:240;...\"] [--dump-every N --dump-dir D] [--trace]\n");
@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
         else if (a == "--run-seconds") runSeconds = atof(next().c_str()); else if (a == "--inject") inject = next();
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
-        else if (a == "--filter") { gl::forceNearest = next() == "nearest"; }
+        else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
@@ -263,9 +263,8 @@ int main(int argc, char** argv) {
         if (!win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return 1; }
         ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
         if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
-        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, getenv("CC_NEAREST") ? "0" : "1");   // smooth scaling to the window (CC_NEAREST=1 for hard pixels)
         SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);
-        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gl::forceNearest ? "nearest" : "linear");   // read when the texture is created
         tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, gl::fbW, gl::fbH);
         SDL_AudioSpec want{}, have{}; want.freq = 44100; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = 1024; want.callback = audioCallback;
         adev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);

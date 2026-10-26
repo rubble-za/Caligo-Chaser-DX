@@ -29,7 +29,7 @@ static std::map<uint32_t, Tex> texs; static uint32_t nextTex = 1, boundTex = 0, 
 static Mat mvM = identity(), prM = identity(), txM = identity(); static uint32_t matMode = MODELVIEW;
 static VA vtx, col, nrm, tc;
 static float curColor[4] = {1, 1, 1, 1}, clearColor[4] = {0, 0, 0, 0};
-static bool forceNearest = false;
+static bool forceNearest = true;   // nearest-neighbour sampling by default; --filter smooth restores bilinear
 static float rs = 1.f;                                   // render scale: the game still draws a 800x480 world, we rasterise it rs times larger
 static int vpX = 0, vpY = 0, vpW = 800, vpH = 480, scX = 0, scY = 0, scW = 800, scH = 480;
 static bool enTex = false, enBlend = false, enScissor = false;

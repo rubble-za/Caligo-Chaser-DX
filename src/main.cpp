@@ -144,7 +144,7 @@ static void steerHero(bool left) { if (g_debugState0) fprintf(stderr, "[steer] l
 static bool isDir(int k) { return k == 58 || k == 59 || k == 60 || k == 61; }
 // 8-way movement: the game reads a single direction key per tick, so while a horizontal and a vertical direction are held in the world we alternate between
 // them tick by tick (not loop by loop: the game ticks every second or third loop, which would keep landing on the same direction). The hero then moves diagonally using the game's own movement and collision (at about 0.7 of the straight-line speed, like a normalised diagonal).
-static bool g_eightWay = true, g_diagPhase = false;
+static bool g_eightWay = true, g_diagPhase = false, g_diagBoost = true;
 static bool inGameplay();
 static int wantDir() {
     if (g_dirStack.empty()) return -1;
@@ -167,7 +167,26 @@ static void dirSync() {
 static void inputTick() {
     if (g_repress > 0 && --g_repress == 0) { if (g_keyRef[62] > 0) pushEvent(2, 62, -1); }
 }
-static void diagonalTick() { if (g_eightWay && g_dirStack.size() >= 2) { g_diagPhase = !g_diagPhase; dirSync(); } }   // run before every game tick: switch axis (no-op unless both axes are held)
+// The hero's world position (found by diffing memory while walking): x at lib+0x3d30bc, y right after it, in pixels, y growing downwards.
+// One axis per tick gives a diagonal only 1/sqrt(2) of the straight-line speed, so after each tick in which the game moved the hero one step along the axis we sent,
+// we add (sqrt(2)-1) of that step on the same axis: over two ticks that is sqrt(2) steps per axis, i.e. the full straight-line speed along the diagonal.
+// The game still decides whether a step is allowed (walls etc.): we only ever add to a step it actually took.
+static const uint32_t HERO_POS_OFF = 0x3d30bc; static int32_t g_heroPrev[2]; static float g_nudge[2];
+static bool diagonalActive() { return g_eightWay && g_dirStack.size() >= 2 && inGameplay(); }
+static void diagonalTick() {                                       // run before every game tick: switch axis (no-op unless both axes are held)
+    if (g_eightWay && g_dirStack.size() >= 2) { g_diagPhase = !g_diagPhase; dirSync(); }
+    rdbuf(LIB_BASE + HERO_POS_OFF, g_heroPrev, 8);
+}
+static void diagonalAfterTick() {
+    if (!diagonalActive() || !g_diagBoost) { g_nudge[0] = g_nudge[1] = 0; return; }
+    int32_t now2[2]; rdbuf(LIB_BASE + HERO_POS_OFF, now2, 8);
+    int sent = g_dirSent, axis = (sent == 60 || sent == 61) ? 0 : (sent == 58 || sent == 59) ? 1 : -1; if (axis < 0) return;
+    int32_t d[2] = {now2[0] - g_heroPrev[0], now2[1] - g_heroPrev[1]};
+    int sign = (sent == 61 || sent == 59) ? 1 : -1;
+    if (d[1 - axis] != 0 || d[axis] * sign <= 0 || abs(d[axis]) > 16) return;      // only a normal step in the direction we sent (not knock-back, teleports, a blocked step)
+    g_nudge[axis] += (float)d[axis] * 0.41421356f; int e = (int)g_nudge[axis]; if (!e) return;
+    g_nudge[axis] -= (float)e; now2[axis] += e; wrbuf(LIB_BASE + HERO_POS_OFF, now2, 8);
+}
 static void inputKey(int gk, bool down) {
     if (gk < 0) return;
     if (g_debugState0) fprintf(stderr, "[input] game key %d %s\n", gk, down ? "down" : "up");
@@ -253,6 +272,7 @@ static void usage() {
         "  --filter nearest|smooth   texture filtering (default nearest = crisp pixels, best at --res 1600x960 / 2400x1440; smooth = bilinear)\n"
         "  --res WxH        render resolution, e.g. 1920x1080 (default 1600x960; use 800x480 for the original size on slower PCs; layout is kept, picture is rendered larger)\n"
         "  --four-way       original 4-way movement (diagonals are on by default: two held directions alternate frame by frame)\n"
+        "  --no-diag-boost  diagonals at about 0.7 of the straight-line speed instead of full speed\n"
         "  --soft           use the software renderer instead of the GPU (OpenGL) renderer\n"
         "  --no-strip-fix   turn off the repair of stray effect pixels left above the hotbar\n"
         "  --fps <n|auto>   frame rate limit: exact n without vsync, 0 = unlimited (default auto: about 60, vsync-aligned, e.g. 72 on a 144 Hz display)\n"
@@ -272,7 +292,7 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--four-way") g_eightWay = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
+        else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
@@ -350,7 +370,7 @@ int main(int argc, char** argv) {
         bool wasActive = stickDir != -1; int thr = wasActive ? 12000 : 18000;           // hysteresis
         if (mag > thr) {
             int h = ax > 0 ? 61 : 60, v = ay > 0 ? 59 : 58;
-            bool diag = g_eightWay && inGameplay() && std::min(abs(ax), abs(ay)) * 1000 > std::max(abs(ax), abs(ay)) * 414;
+            bool diag = g_eightWay && inGameplay() && std::min(abs(ax), abs(ay)) * 1000 > std::max(abs(ax), abs(ay)) * 433;
             if (diag) { want = h; wantV = v; } else want = abs(ax) > abs(ay) ? h : v;
         }
         if (stickDir != -1 && stickDir != want) inputKey(stickDir, false);
@@ -365,7 +385,7 @@ int main(int argc, char** argv) {
     static Uint64 s_lastReal = t0; static int64_t s_virt = 0;
     auto gameClock = [t0]() -> int64_t { Uint64 r = SDL_GetTicks64(); Uint64 d = r - s_lastReal; s_lastReal = r; s_virt += (int64_t)std::min<Uint64>(d, 100); (void)t0; return s_virt; };
     if (!hl) g_clockFn = gameClock;
-    g_beforeTick = diagonalTick;
+    g_beforeTick = diagonalTick; g_afterTick = diagonalAfterTick;
     gameInit(0);
     if (hl) {
         if (dumpEvery) std::filesystem::create_directories(dumpDir);
@@ -468,8 +488,7 @@ int main(int argc, char** argv) {
             }
         }
         if (!paused) {
-            inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();
-            if (gl::hw::on) { int hi = peekInt("nState") == 4 ? peekInt("g_nMenuIndex") : -1; gl::hw::present(hi >= 0 && hi <= 2 ? hi : -1); }
+            inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();            if (gl::hw::on) { int hi = peekInt("nState") == 4 ? peekInt("g_nMenuIndex") : -1; gl::hw::present(hi >= 0 && hi <= 2 ? hi : -1); }
             else {
                 SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
                 SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr); SDL_RenderPresent(ren);

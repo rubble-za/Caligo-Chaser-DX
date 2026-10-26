@@ -102,6 +102,7 @@ static void gameInit(int64_t startMs) {
 // One iteration of WrapperManager.run() (called once per displayed frame, like GLSurfaceView.onDrawFrame).
 static std::function<void()> g_preFrame;                     // host-side patches applied before each frame
 static std::function<void()> g_beforeTick;                   // host hook run right before each game tick (timer callback)
+static std::function<void()> g_afterTick;                    // ... and right after it
 static void flushEvents() {                                  // deliver queued input to the game
     while (!g_events.empty()) { EventItem e = g_events.front(); g_events.pop_front();
         if (e.type == -100) { auto it = g_exports.find("nCheckDashPressStart"); if (it != g_exports.end()) { uint32_t v = 0xFFFFFFFFu; wrbuf(it->second, &v, 4); } continue; }   // host pseudo-event: forget the previous direction tap (kills double-tap dash)
@@ -124,6 +125,7 @@ static void gameFrame(int64_t nowMs) {
         int64_t old = g_fireList[i];
         if (g_beforeTick) { g_beforeTick(); flushEvents(); }   // the game's logic reads its input state once per tick, so anything that depends on ticks (8-way alternation) runs here
         callGuest(nativeFn("Render"), {ENV_ADDR, g_cls, (uint32_t)g_timerList[i]});
+        if (g_afterTick) g_afterTick();
         if (old == g_fireList[i]) g_timerList[i] = 0;
     }
     callGuest(nativeFn("ReDraw"), {ENV_ADDR, g_cls});

@@ -18,6 +18,7 @@ CONTROLS
                   1 2 3 4 5 (or Q W E R T) = skill slots      I = info      P (or 0 / ;) = charge
                   Space or Tab/F1 = menu      Enter = confirm      Esc or Backspace = Back/cancel
   Mouse         also: right button = Back.
+  NPC dialogue: Select / Enter / click moves to the next page; Back (B, Esc or right click) skips the rest of the conversation.
   Button hints: menus (title, save slots, in-game menu, world map) and NPC dialogue show a small pill with the buttons for the
                 input you used last: controller (D-pad / stick, A, B; PlayStation and Nintendo controllers get their own
                 button symbols), keyboard (arrows, Enter, Esc) or mouse (left / right button). It follows you as you switch

@@ -64,8 +64,8 @@ static bool composeSoft(std::vector<uint32_t>& dst) {
             float dx = (x + .5f) / rs; int nx = std::min(hud::NAT_W - 1, (int)(dx / K));
             int sy = (ny >= hud::SLOT_FRAME_Y0 && nx >= hud::SLOT_X0 && nx < frameSpan) ? hud::SLOT_FRAME_Y0 - 1 : ny;      // rows 216..219 there are the game's frame tops: repeat the clean row above
             uint32_t px = T(nx, sy);
-            if (dy >= wBottom - 14.f) {                                                                                  // below the world: a smooth fade from the average world colour to dark (no repeated pixels); a soft edge over its last rows
-                float a = std::min(1.f, (dy - (wBottom - 14.f)) / 14.f), f = dy < wBottom ? 1.f : 1.f - 0.88f * (dy - wBottom) / (480.f - wBottom);
+            if (hud::showBar) {                                                                                  // below the world: a stepped fade (native-pixel bands) from the average world colour to dark
+                float a, f; hud::fadeAt(std::min(hud::NAT_H - 1, (int)(dy / hud::SY)), a, f);
                 uint32_t r = (uint32_t)(((px & 255) * (1 - a) + cr * f * a)), g = (uint32_t)(((px >> 8 & 255) * (1 - a) + cg * f * a)), b = (uint32_t)(((px >> 16 & 255) * (1 - a) + cb * f * a)); px = r | g << 8 | b << 16; }
             if (hud::showBar) {
                 float gx = (dx - 400.f) / K + hud::GW / 2.f, gy = (dy - top) / K;
@@ -371,7 +371,7 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--classic-hud") hud::enabled = false; else if (a == "--no-hotbar") hud::showBar = false; else if (a == "--square-pixels") hud::SY = hud::K; else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
+        else if (a == "--classic-hud") hud::enabled = false; else if (a == "--hotbar") hud::showBar = true; else if (a == "--no-hotbar") hud::showBar = false; else if (a == "--square-pixels") hud::SY = hud::K; else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
         else if (a == "--hints") { std::string v = next(); g_hintsMode = v == "off" ? -2 : v == "kb" ? ov::KEYBOARD : v == "pad" ? ov::CONTROLLER : v == "mouse" ? ov::MOUSE : -1; }      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }

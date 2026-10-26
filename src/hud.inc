@@ -4,7 +4,7 @@
 // Nothing is stored: every picture pixel comes from the frame the game just drew. All numbers below are measured from the game's native 384x256 buffer.
 namespace hud {
 static bool enabled = true;                  // --classic-hud turns the whole thing off
-static bool showBar = true;                  // --no-hotbar hides the hotbar and EXP bar (the keys / clicks still work)
+static bool showBar = true;                  // --hotbar shows the compact hotbar and EXP bar; by default they are hidden and the world fills the whole window (hotkeys still work). Was: --no-hotbar hides the hotbar and EXP bar (the keys / clicks still work)
 static bool active = false;                  // set every frame by the game loop: true only while the composed layout applies
 static const int NAT_W = 384, NAT_H = 256, TEX_W = 512;      // the game's framebuffer and the texture it is copied into
 static const int WORLD_ROWS = 220;           // the game draws its world inside SetClip(0,0,384,220)
@@ -26,6 +26,14 @@ static const float K = 800.f / NAT_W;                                    // desi
 static float SY = 480.f / NAT_H;                                         // design pixels per native row for the world: the game's own 1.875 (its pixels are slightly wide); --square-pixels makes it K
 static float groupX(float gx) { return 400.f + (gx - GW / 2.f) * K; }                                   // group centred on the screen,
 static float groupY(float gy) { return 480.f - 10.f - GH * K + gy * K; }                                  // 10 design pixels above the bottom edge
+
+// Fade below the world, in steps of 3 native rows (the game's own pixel size) with an ease-in curve: a = how much of the fade colour, f = brightness of that colour.
+static const int FADE_R0 = 212, FADE_BAND = 3;
+static void fadeAt(int r, float& a, float& f) {
+    if (r < FADE_R0) { a = 0; f = 1; return; }
+    int q = (r - FADE_R0) / FADE_BAND, n = (NAT_H - FADE_R0 + FADE_BAND - 1) / FADE_BAND; float u = (q + .5f) / n;
+    a = std::min(1.f, u * 8.f); float e = std::max(0.f, (u - .12f) / .88f); f = 1.f - 0.88f * e * e;
+}
 
 // Mouse / touch position in 800x480 design space -> the position the game expects (also 800x480 design space, as if the screen were laid out the original way).
 static void unmapTouch(float& x, float& y) {

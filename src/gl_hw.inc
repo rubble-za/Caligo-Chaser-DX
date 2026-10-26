@@ -141,12 +141,12 @@ static void present(int hlIdx, const ov::Bitmap* ovb) {
         quad(0, split, xa, wBottom, 0, v216, ua, v220); quad(xa, split, xb, wBottom, ua, vrep, ub, vrep); quad(xb, split, 800, wBottom, ub, v216, uR, v220);
         glEnd();
         glDisable(GL_TEXTURE_2D); glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        {   // Below the world there is nothing to show: a smooth fade from the average colour of a clean world row to dark, with no repeated pixels (so no streaks).
+        if (hud::showBar) {   // Below the world there is nothing to show: a smooth fade from the average colour of a clean world row to dark, with no repeated pixels (so no streaks).
             uint32_t ar = 0, ag = 0, ab = 0; for (int x = 0; x < hud::NAT_W; x++) { uint32_t p = gt->px[(size_t)(hud::SLOT_FRAME_Y0 - 1) * hud::TEX_W + x]; ar += p & 255; ag += p >> 8 & 255; ab += p >> 16 & 255; }
             float cr = ar / (float)hud::NAT_W / 255.f, cg = ag / (float)hud::NAT_W / 255.f, cb = ab / (float)hud::NAT_W / 255.f, dark = 0.12f, soft = 14.f;
-            glBegin(GL_QUADS);
-            glColor4f(cr, cg, cb, 0); glVertex2f(X(0), Y(wBottom - soft)); glVertex2f(X(800), Y(wBottom - soft)); glColor4f(cr, cg, cb, 1); glVertex2f(X(800), Y(wBottom)); glVertex2f(X(0), Y(wBottom));       // soft top edge over the world's last rows
-            glColor4f(cr, cg, cb, 1); glVertex2f(X(0), Y(wBottom)); glVertex2f(X(800), Y(wBottom)); glColor4f(cr * dark, cg * dark, cb * dark, 1); glVertex2f(X(800), Y(480)); glVertex2f(X(0), Y(480));       // fade to dark
+            glBegin(GL_QUADS);                                                       // stepped fade: bands of 3 native rows (the game's pixel size)
+            for (int r = hud::FADE_R0; r < hud::NAT_H; r += hud::FADE_BAND) { float al, fa; hud::fadeAt(r, al, fa); float y0 = r * hud::SY, y1 = std::min(hud::NAT_H, r + hud::FADE_BAND) * hud::SY;
+                glColor4f(cr * fa, cg * fa, cb * fa, al); glVertex2f(X(0), Y(y0)); glVertex2f(X(800), Y(y0)); glVertex2f(X(800), Y(y1)); glVertex2f(X(0), Y(y1)); }
             glEnd();
         }
         if (hud::showBar) {                                                          // the hotbar pieces cut from the game's own texture, drawn after the fade so they sit on top of it

@@ -18,7 +18,10 @@ CONTROLS
                   1 2 3 4 5 (or Q W E R T) = skill slots      I = info      P (or 0 / ;) = charge
                   Space or Tab/F1 = menu      Enter = confirm      Esc or Backspace = Back/cancel
   F11           fullscreen          F12   screenshot (PNG, next to the program)
-  Overlapping input: the most recently pressed direction wins; releasing it resumes the one still held.
+  8-way movement: hold two directions (for example Up + Right, or push the stick diagonally) to walk diagonally. The game itself
+  only understands one direction at a time, so the two directions are alternated frame by frame; the hero uses the game's own
+  movement and collision and moves at about 0.7 of the straight-line speed along each diagonal. In menus the original
+  behaviour applies (the most recently pressed direction wins). --four-way turns diagonals off everywhere.
   Xbox-layout controller (plug in any time):
     Left stick       move (4-way)
     A or X           main action / confirm

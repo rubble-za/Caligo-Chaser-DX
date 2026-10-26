@@ -23,7 +23,6 @@ static bool savePng(const std::string& path) {
 
 static bool g_wlog = false;
 static void onMemWrite(uc_engine*, uc_mem_type, uint64_t addr, int size, int64_t value, void*) {
-    if (g_fbRow220 && g_stripFix && size <= 8) { uint8_t nb[8]; for (int i = 0; i < size; i++) nb[i] = (uint8_t)((uint64_t)value >> (8 * i)); stripWrite((uint32_t)addr, nb, (uint32_t)size); }   // bottom-strip repair, see imports.inc
     static long wa = getenv("CC_WADDR") ? (long)strtoul(getenv("CC_WADDR"), nullptr, 16) : -1;
     if (wa >= 0) { if ((uint32_t)addr >= LIB_BASE + (uint32_t)wa && (uint32_t)addr < LIB_BASE + (uint32_t)wa + 4) fprintf(stderr, "WA f=%lld val=%lld pc=lib+%x now=%lld\n", (long long)g_nowMs, (long long)value, reg(PC) - LIB_BASE, (long long)g_nowMs); return; }
     if (!g_wlog || size > 4 || (uint64_t)value > 300) return;
@@ -73,7 +72,7 @@ static void bootHost(const std::vector<uint8_t>& lib) {
     uc_hook h1, h2;
     UC_CHECK(uc_hook_add(g_uc, &h1, UC_HOOK_CODE, (void*)onCode, nullptr, STUB_BASE, STUB_BASE + STUB_SIZE - 1));
     UC_CHECK(uc_hook_add(g_uc, &h2, UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED | UC_HOOK_MEM_FETCH_UNMAPPED, (void*)onMemInvalid, nullptr, 1, 0));
-    { static uc_hook hw; UC_CHECK(uc_hook_add(g_uc, &hw, UC_HOOK_MEM_WRITE, (void*)onMemWrite, nullptr, 1, 0)); }
+    if (getenv("CC_WLOG") || getenv("CC_WADDR")) { static uc_hook hw; UC_CHECK(uc_hook_add(g_uc, &hw, UC_HOOK_MEM_WRITE, (void*)onMemWrite, nullptr, 1, 0)); }   // debug only: a global write hook makes every guest store call back into the host
     uint32_t ninit = loadLibMem(lib);
     for (uint32_t i = 0; i < ninit; i++) callGuest(g_exports["__init_" + std::to_string(i)]);
     if (g_hideTouchUi) {                                          // desktop: skip the on-screen d-pad / action-button overlay (DrawViewGameVirtualKey)
@@ -143,8 +142,20 @@ static int g_dirSent = -1; static bool g_aimFollow = false; static bool g_allowD
 static int peekInt(const char* n);
 static void steerHero(bool left) { if (g_debugState0) fprintf(stderr, "[steer] left=%d nState=%d mode=%d\n", left, peekInt("nState"), peekInt("nGameMode")); if (peekInt("nState") != 12 || peekInt("nGameMode") != 0) return; auto it = g_exports.find("g_tHeroProp"); if (it == g_exports.end()) return; uint8_t v = left ? 1 : 0; wrbuf(it->second + 4, &v, 1); } static int g_repress = 0;                         // direction currently pressed in the game
 static bool isDir(int k) { return k == 58 || k == 59 || k == 60 || k == 61; }
+// 8-way movement: the game reads a single direction key per frame, so while a horizontal and a vertical direction are held in the world we alternate between
+// them frame by frame. The hero then moves diagonally using the game's own movement and collision (at about 0.7 of the straight-line speed, like a normalised diagonal).
+static bool g_eightWay = true, g_diagPhase = false;
+static bool inGameplay();
+static int wantDir() {
+    if (g_dirStack.empty()) return -1;
+    if (!g_eightWay || !inGameplay()) return g_dirStack.back();
+    int h = -1, v = -1;                                                      // most recently pressed horizontal / vertical direction
+    for (int i = (int)g_dirStack.size() - 1; i >= 0 && (h < 0 || v < 0); i--) { int k = g_dirStack[i]; if (k == 60 || k == 61) { if (h < 0) h = k; } else if (v < 0) v = k; }
+    if (h < 0 || v < 0) return h >= 0 ? h : v;
+    return g_diagPhase ? h : v;
+}
 static void dirSync() {
-    int want = g_dirStack.empty() ? -1 : g_dirStack.back();
+    int want = wantDir();
     if (want == g_dirSent) return;
     if (g_dirSent != -1) pushEvent(3, g_dirSent, -1);
     if (want != -1) { if (!g_allowDoubleTapDash) pushEvent(-100, 0, 0); pushEvent(2, want, -1); }
@@ -153,7 +164,10 @@ static void dirSync() {
     if (g_aimFollow && want != -1 && g_keyRef[62] > 0 && g_repress == 0) { pushEvent(3, 62, -1); g_repress = 2; }
     g_dirSent = want;
 }
-static void inputTick() { if (g_repress > 0 && --g_repress == 0) { if (g_keyRef[62] > 0) pushEvent(2, 62, -1); } }
+static void inputTick() {
+    if (g_repress > 0 && --g_repress == 0) { if (g_keyRef[62] > 0) pushEvent(2, 62, -1); }
+    if (g_eightWay && g_dirStack.size() >= 2) { g_diagPhase = !g_diagPhase; dirSync(); }       // diagonal held: switch axis for this frame (no-op unless both axes are held)
+}
 static void inputKey(int gk, bool down) {
     if (gk < 0) return;
     if (g_debugState0) fprintf(stderr, "[input] game key %d %s\n", gk, down ? "down" : "up");
@@ -238,6 +252,7 @@ static void usage() {
         "  --touch-ui       keep the on-screen d-pad and action buttons (hidden by default)\n"
         "  --filter nearest|smooth   texture filtering (default nearest = crisp pixels, best at --res 1600x960 / 2400x1440; smooth = bilinear)\n"
         "  --res WxH        render resolution, e.g. 1920x1080 (default 1600x960; use 800x480 for the original size on slower PCs; layout is kept, picture is rendered larger)\n"
+        "  --four-way       original 4-way movement (diagonals are on by default: two held directions alternate frame by frame)\n"
         "  --soft           use the software renderer instead of the GPU (OpenGL) renderer\n"
         "  --no-strip-fix   turn off the repair of stray effect pixels left above the hotbar\n"
         "  --fps <n|auto>   frame rate limit: exact n without vsync, 0 = unlimited (default auto: about 60, vsync-aligned, e.g. 72 on a 144 Hz display)\n"
@@ -257,7 +272,7 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
+        else if (a == "--four-way") g_eightWay = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
@@ -310,7 +325,7 @@ int main(int argc, char** argv) {
     }
 
     if (fpsCap < 0) fpsCap = 60;                                   // software renderer / fallback: plain 60 fps limiter
-    bool lb = false; int dpadSent[4] = {-1,-1,-1,-1}; int stickDir = -1;
+    bool lb = false; int dpadSent[4] = {-1,-1,-1,-1}; int stickDir = -1, stickV = -1;     // left stick: horizontal (or the only) direction / vertical direction when pushed diagonally
     auto padButton = [&](int b, bool dn) {
                 switch (b) {
                 case SDL_CONTROLLER_BUTTON_START: inputKey(10001, dn); break;                       // MENU (top-left button)
@@ -356,7 +371,9 @@ int main(int argc, char** argv) {
                      } } }
             inputTick();
             for (auto& pe : padEv) if (std::get<0>(pe) == f) padButton(std::get<1>(pe), std::get<2>(pe));
-            gameFrame(now);
+            { static const double slowMs = getenv("CC_SLOWFRAMES") ? atof(getenv("CC_SLOWFRAMES")) : 0; auto tf = std::chrono::steady_clock::now(); double d0 = gl::drawSeconds;   // dev: CC_SLOWFRAMES=ms lists frames slower than that
+              gameFrame(now); double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tf).count();
+              if (slowMs > 0 && ms > slowMs) fprintf(stderr, "[slow] frame %d: %.1f ms (GL %.1f ms)\n", f, ms, (gl::drawSeconds - d0) * 1000); }
             if (const char* pk = getenv("CC_PEEK")) { if (f % 4 == 0) { uint32_t v[2] = {0, 0}; rdbuf(LIB_BASE + (uint32_t)strtoul(pk, nullptr, 16), v, 8); fprintf(stderr, "P %d %u %u\n", f, v[0], v[1]); } }
             if (getenv("CC_WATCH") && f % 20 == 0) { static const char* nm[] = {"nState","nGameState","nGameMode","g_nSubState","nGameMsgType","blnDialogActive","blnSltDialog","blnPopupCurOn","blnPopupCurOn2"}; std::string s; for (auto n : nm) { auto it = g_exports.find(n); uint32_t v = 0; if (it != g_exports.end()) rdbuf(it->second, &v, 4); if (!strcmp(n, "g_nSubState")) v &= 255; s += std::string(n) + "=" + std::to_string((int)v) + " "; } fprintf(stderr, "W %d %s\n", f, s.c_str()); }
             if (dumpEvery && f % dumpEvery == 0) { char b[512]; snprintf(b, sizeof b, "%s/frame_%05d.png", dumpDir.c_str(), f); savePng(b); }
@@ -376,7 +393,7 @@ int main(int argc, char** argv) {
     SDL_GameControllerEventState(SDL_ENABLE); openPad(); 
     auto releaseAllInput = [&](int64_t t) {
         if (g_touch.down) { g_touch.down = false; touchEvent(1, g_touch.x, g_touch.y, t); }
-        inputReleaseAll(); lb = false; for (int& d : dpadSent) d = -1; stickDir = -1;
+        inputReleaseAll(); lb = false; for (int& d : dpadSent) d = -1; stickDir = -1; stickV = -1;
     };
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     const Uint64 perfFreq = SDL_GetPerformanceFrequency(); Uint64 nextFrame = SDL_GetPerformanceCounter();
@@ -413,10 +430,18 @@ int main(int argc, char** argv) {
                     break; }
                 if (e.caxis.axis != SDL_CONTROLLER_AXIS_LEFTX && e.caxis.axis != SDL_CONTROLLER_AXIS_LEFTY) break;
                 int ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX), ay = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
-                int want = -1; int mag = std::max(abs(ax), abs(ay));
+                int want = -1, wantV = -1; int mag = std::max(abs(ax), abs(ay));
                 bool wasActive = stickDir != -1; int thr = wasActive ? 12000 : 18000;           // hysteresis
-                if (mag > thr) want = abs(ax) > abs(ay) ? (ax > 0 ? 61 : 60) : (ay > 0 ? 59 : 58);
-                if (want != stickDir) { if (stickDir != -1) inputKey(stickDir, false); if (want != -1) inputKey(want, true); stickDir = want; }
+                if (mag > thr) {
+                    int h = ax > 0 ? 61 : 60, v = ay > 0 ? 59 : 58;
+                    bool diag = g_eightWay && inGameplay() && std::min(abs(ax), abs(ay)) * 1000 > std::max(abs(ax), abs(ay)) * 414;   // within 22.5 deg of a diagonal
+                    if (diag) { want = h; wantV = v; } else want = abs(ax) > abs(ay) ? h : v;
+                }
+                if (stickDir != -1 && stickDir != want) inputKey(stickDir, false);
+                if (stickV != -1 && stickV != wantV) inputKey(stickV, false);
+                if (want != -1 && want != stickDir) inputKey(want, true);
+                if (wantV != -1 && wantV != stickV) inputKey(wantV, true);
+                stickDir = want; stickV = wantV;
                 break; }
             case SDL_KEYDOWN: case SDL_KEYUP: {
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F11) { Uint32 f = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP; SDL_SetWindowFullscreen(win, f ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP); break; }

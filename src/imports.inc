@@ -27,43 +27,32 @@ static uint32_t callGuestNested(uint32_t fn, std::vector<uint32_t> args) {
 // ---- bottom-strip repair (world/dungeon) ----
 // The game redraws its world every frame only down to row 219 and its hotbar from row 216 down, and rows 220-221 between the hotbar slots belong to no layer:
 // effect sprites that overshoot into them leave pixels there that are never repainted. The original's smooth scaling hid it; with crisp pixels it shows as a stuck line.
-// The game copies its 384x256 RGB565 framebuffer into the 512x256 texture row by row (memcpy of 768 bytes). We journal every write that changes a pixel of rows 220-221
-// (the hotbar redraws identical values, so it changes nothing), remembering the value the pixel had before the first change, and when copying those two rows we put the
-// remembered values back. The game's own framebuffer is left untouched. For a moment after entering the world the initial paint is accepted as the baseline instead.
-static bool g_stripFix = true, g_stripOn = false, g_stripArmed = false;       // g_stripOn: set each frame, only in the world (not menus / map select)
+// The game copies its 384x256 RGB565 framebuffer into the 512x256 texture row by row (memcpy of 768 bytes). At each copy of rows 220-221 we compare the row with the previous
+// copy: a pixel that changed is remembered with the value it had before the first change (the hotbar redraws identical values, so it never changes), and those remembered
+// values are what we put in the texture. The game's own framebuffer is left untouched. Right after entering the world, and whenever a large part of a row changes at once
+// (a window or overlay opening), the new content is accepted as the baseline instead.
+static bool g_stripFix = true, g_stripOn = false;                              // g_stripOn: set each frame, only in the world (not menus / dialogue / map select)
 static int64_t g_stripNow = 0, g_stripLearnUntil = 0;                          // game clock (ms) / end of the baseline-learning window
-static uint32_t g_texBase = 0, g_fbRow220 = 0;                                 // guest address of the game texture's pixels / of row 220 of the game's framebuffer
-static uint16_t g_stripOrig[2][384]; static bool g_stripDirty[2][384]; static int g_stripChanged = 0;       // pixels of rows 220-221 changed since the last copy
-static void stripWrite(uint32_t a, const uint8_t* nb, uint32_t n) {            // called before the guest's write of n bytes at a
-    if (!g_fbRow220 || a >= g_fbRow220 + 2 * 768 || a + n <= g_fbRow220) return;
-    bool learn = !g_stripOn || g_stripNow < g_stripLearnUntil;
-    uint32_t lo = std::max(a, g_fbRow220), hi = std::min(a + n, g_fbRow220 + 2 * 768);
-    for (uint32_t p = lo & ~1u; p < hi; p += 2) {
-        uint32_t off = p - g_fbRow220; int row = (int)(off / 768), x = (int)((off % 768) / 2);
-        uint8_t cur[2], nw[2]; rdbuf(p, cur, 2); nw[0] = cur[0]; nw[1] = cur[1];
-        for (uint32_t k = 0; k < 2; k++) if (p + k >= a && p + k < a + n) nw[k] = nb[p + k - a];
-        if (nw[0] == cur[0] && nw[1] == cur[1]) continue;                       // same value redrawn: nothing changed
-        g_stripChanged++;
-        if (learn) { g_stripDirty[row][x] = false; continue; }
-        if (!g_stripDirty[row][x]) { g_stripOrig[row][x] = (uint16_t)(cur[0] | cur[1] << 8); g_stripDirty[row][x] = true; }
-        else if ((uint16_t)(nw[0] | nw[1] << 8) == g_stripOrig[row][x]) g_stripDirty[row][x] = false;      // put back to the baseline value
-    }
-}
+static uint32_t g_texBase = 0;                                                 // guest address of the game texture's pixels
+static uint16_t g_stripLast[2][384], g_stripOrig[2][384]; static bool g_stripDirty[2][384], g_stripHave[2];
 static void stripFlush(uint32_t d, uint32_t s, uint32_t n, std::vector<uint8_t>& b) {
+    (void)s;
     if (!g_stripFix || !g_texBase || n != 768 || d < g_texBase || (d - g_texBase) % 1024) return;
     uint32_t r = (d - g_texBase) / 1024; if (r != 220 && r != 221) return;
-    if (r == 220) {
-        g_fbRow220 = s;
-        if (g_stripChanged > 150) { g_stripLearnUntil = g_stripNow + 1500; memset(g_stripDirty, 0, sizeof g_stripDirty); }   // a window / overlay redrew much of the two rows: that is interface, not stray pixels
-        g_stripChanged = 0;
-    }
-    bool learn = !g_stripOn || g_stripNow < g_stripLearnUntil;
+    int row = (int)r - 220; bool learn = !g_stripOn || g_stripNow < g_stripLearnUntil;
+    uint16_t cur[384]; int changed = 0;
+    for (int x = 0; x < 384; x++) { cur[x] = (uint16_t)(b[2 * x] | b[2 * x + 1] << 8); if (g_stripHave[row] && cur[x] != g_stripLast[row][x]) changed++; }
+    if (changed > 100) { learn = true; g_stripLearnUntil = g_stripNow + 1500; }           // an overlay redrew much of the row: that is interface, not stray pixels
     for (int x = 0; x < 384; x++) {
-        if (!g_stripDirty[r - 220][x]) continue;
-        if (learn) { g_stripDirty[r - 220][x] = false; continue; }
-        b[2 * x] = (uint8_t)(g_stripOrig[r - 220][x] & 255); b[2 * x + 1] = (uint8_t)(g_stripOrig[r - 220][x] >> 8);
+        if (g_stripHave[row] && cur[x] != g_stripLast[row][x]) {
+            if (learn) g_stripDirty[row][x] = false;
+            else if (!g_stripDirty[row][x]) { g_stripOrig[row][x] = g_stripLast[row][x]; g_stripDirty[row][x] = true; }
+            else if (cur[x] == g_stripOrig[row][x]) g_stripDirty[row][x] = false;
+        }
+        g_stripLast[row][x] = cur[x];
+        if (g_stripDirty[row][x]) { if (learn) g_stripDirty[row][x] = false; else { b[2 * x] = (uint8_t)(g_stripOrig[row][x] & 255); b[2 * x + 1] = (uint8_t)(g_stripOrig[row][x] >> 8); } }
     }
-    if (r == 221) g_stripArmed = true;
+    g_stripHave[row] = true;
 }
 
 static void registerImports() {
@@ -90,9 +79,9 @@ static void registerImports() {
     I("__gnu_Unwind_Find_exidx", [] { ret(0); });
 
     // ---- mem/str ----
-    I("memcpy",  [] { uint32_t d = arg(0), s = arg(1), n = arg(2); std::vector<uint8_t> b(n); rdbuf(s, b.data(), n); std::vector<uint8_t> out = b; stripFlush(d, s, n, out); stripWrite(d, b.data(), n); wrbuf(d, out.data(), n); ret(d); });
+    I("memcpy",  [] { uint32_t d = arg(0), s = arg(1), n = arg(2); std::vector<uint8_t> b(n); rdbuf(s, b.data(), n); stripFlush(d, s, n, b); wrbuf(d, b.data(), n); ret(d); });
     I("memmove", g_impl["memcpy"]);
-    I("memset",  [] { uint32_t d = arg(0), n = arg(2); std::vector<uint8_t> b(n, (uint8_t)arg(1)); stripWrite(d, b.data(), n); wrbuf(d, b.data(), n); ret(d); });
+    I("memset",  [] { uint32_t d = arg(0), n = arg(2); std::vector<uint8_t> b(n, (uint8_t)arg(1)); wrbuf(d, b.data(), n); ret(d); });
     I("memcmp",  [] { uint32_t n = arg(2); std::vector<uint8_t> a(n), b(n); rdbuf(arg(0), a.data(), n); rdbuf(arg(1), b.data(), n); ret((uint32_t)memcmp(a.data(), b.data(), n)); });
     I("strlen",  [] { ret((uint32_t)rdstr(arg(0), 1 << 24).size()); });
     I("strcpy",  [] { std::string s = rdstr(arg(1), 1 << 24); wrbuf(arg(0), s.c_str(), s.size() + 1); ret(arg(0)); });

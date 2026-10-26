@@ -115,7 +115,7 @@ static void gameFrame(int64_t nowMs) {
       if (c != g_exports.end()) rdbuf(c->second, &dlg, 1);
       if (d != g_exports.end()) rdbuf(d->second, &msg, 4);
       uint32_t gs = 0; { auto e = g_exports.find("nGameState"); if (e != g_exports.end()) rdbuf(e->second, &gs, 4); }
-      hud::active = st == 12 && gs <= 1 && gm != 2 && !dlg;                // composed gameplay HUD (hud.inc): normal play only. Not on the world map, in a shop (nGameState 5) or during a conversation, whose box sits where the bar is
+      hud::active = st == 12 && (gs <= 1 || gs == 5) && gm != 2 && !dlg;    // composed gameplay HUD (hud.inc): normal play and vendor shops (nGameState 5). Not on the world map or during a conversation, whose box sits where the bar is
       bool on = st == 12 && gm != 2 && !dlg && !msg;                       // not while an NPC dialogue / game message is up: those draw into the same rows
       if (on && !g_stripOn) g_stripLearnUntil = nowMs + 1500; g_stripOn = on; g_stripNow = nowMs; }   // see bottom-strip repair in imports.inc
     if (g_preFrame) g_preFrame();

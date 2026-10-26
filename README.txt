@@ -23,11 +23,12 @@ CONTROLS
                 input you used last: controller (D-pad / stick, A, B; PlayStation and Nintendo controllers get their own
                 button symbols), keyboard (arrows, Enter, Esc) or mouse (left / right button). It follows you as you switch
                 devices. --hints off hides it; --hints kb|pad|mouse forces one set.
-  Gameplay screen: in town and dungeons the world is stretched over the whole window and only the five hotbar slots (with their
-                icons, counts and cooldowns) and the EXP bar are drawn, centred at the bottom; the wide tan bar behind them is gone.
-                Mouse clicks on the slots and the world work as before. Menus, shops, the world map and conversations keep the
-                game's original layout. --classic-hud turns this off. Vendor shops also show the A / B hint, bottom right.
-  F11           fullscreen          F12   screenshot (PNG, next to the program)
+  Gameplay screen: in town, dungeons and vendor shops the wide tan bar along the bottom is gone. The world keeps the game's own
+                proportions and fades to dark at the bottom, and only the five hotbar slots (live icons, counts and cooldowns, in a
+                thin gold border) and the EXP bar are drawn, centred. Mouse clicks on the slots and the world work as before.
+                Menus, the world map and conversations keep the game's original layout. --classic-hud turns this off,
+                --no-hotbar hides the hotbar and EXP bar completely (hotkeys and clicks still work), --square-pixels draws the
+                world with square pixels (a little taller than the original proportions). Vendor shops also show the A / B hint.  F11           fullscreen          F12   screenshot (PNG, next to the program)
   8-way movement: hold two directions (for example Up + Right, or push the stick diagonally) to walk diagonally. The game itself
   only understands one direction at a time, so the two directions are alternated on every game tick, and each step the game
   takes is topped up by about 41% so the hero keeps its full straight-line speed along a diagonal. The hero still uses the

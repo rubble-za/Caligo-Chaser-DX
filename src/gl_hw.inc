@@ -130,19 +130,51 @@ static void present(int hlIdx, const ov::Bitmap* ovb) {
         auto quad = [&](float dx0, float dy0, float dx1, float dy1, float u0, float v0, float u1, float v1) {
             glTexCoord2f(u0, v0); glVertex2f(X(dx0), Y(dy0)); glTexCoord2f(u1, v0); glVertex2f(X(dx1), Y(dy0)); glTexCoord2f(u1, v1); glVertex2f(X(dx1), Y(dy1)); glTexCoord2f(u0, v1); glVertex2f(X(dx0), Y(dy1)); };
         const float tw = (float)hud::TEX_W, th = (float)hud::NAT_H;
+        auto gq = [&](float gx0, float gy0, float gx1, float gy1, float u0, float v0, float u1, float v1) { quad(hud::groupX(gx0), hud::groupY(gy0), hud::groupX(gx1), hud::groupY(gy1), u0, v0, u1, v1); };
+        const float K = hud::K, split = hud::SLOT_FRAME_Y0 * hud::SY, wBottom = hud::WORLD_ROWS * hud::SY, xa = hud::SLOT_X0 * K, xb = (hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_FRAME_W) * K;
+        const float ua = hud::SLOT_X0 / tw, ub = (hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_FRAME_W) / tw, uR = hud::NAT_W / tw;
+        const float v216 = hud::SLOT_FRAME_Y0 / th, v220 = hud::WORLD_ROWS / th, vrep = (hud::SLOT_FRAME_Y0 - 0.5f) / th, vlast = (hud::WORLD_ROWS - 0.5f) / th;
         glBegin(GL_QUADS);
-        // The world, stretched over the whole screen. Rows 216..219 hold the tops of the game's own slot frames at x 119..301 (the part of the world they cover is not
-        // available), so there the clean row above is repeated instead.
-        const float split = hud::SLOT_Y0 * 480.f / hud::WORLD_ROWS, xa = hud::SLOT_X0 * hud::K, xb = (hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_W) * hud::K;
-        const float ua = hud::SLOT_X0 / tw, ub = (hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_W) / tw, v216 = hud::SLOT_Y0 / th, v220 = hud::WORLD_ROWS / th, vrep = (hud::SLOT_Y0 - 0.5f) / th;
-        quad(0, 0, 800, split, 0, 0, hud::NAT_W / tw, v216);
-        quad(0, split, xa, 480, 0, v216, ua, v220); quad(xa, split, xb, 480, ua, vrep, ub, vrep); quad(xb, split, 800, 480, ub, v216, hud::NAT_W / tw, v220);
-        for (int k = 0; k < hud::SLOTS; k++) for (int i = 0; i < hud::SLOT_ROWS; i++) {   // the five slot frames, one row at a time so the rounded outline is exact
-            float nx0 = (float)(hud::SLOT_X0 + k * hud::SLOT_PITCH + hud::SIL_L[i]), nx1 = (float)(hud::SLOT_X0 + k * hud::SLOT_PITCH + hud::SIL_R[i] + 1), ny = (float)(hud::SLOT_Y0 + i);
-            quad(hud::natToDesignX(nx0), hud::natToDesignY(ny), hud::natToDesignX(nx1), hud::natToDesignY(ny + 1), nx0 / tw, ny / th, nx1 / tw, (ny + 1) / th); }
-        quad(hud::natToDesignX((float)hud::EXP_X0), hud::natToDesignY((float)hud::EXP_Y0), hud::natToDesignX((float)hud::EXP_X1), hud::natToDesignY((float)hud::EXP_Y1),       // the EXP label and bar underneath
-             hud::EXP_X0 / tw, hud::EXP_Y0 / th, hud::EXP_X1 / tw, hud::EXP_Y1 / th);
+        // The world at the same scale on both axes (square pixels, no stretching). Rows 216..219 hold the tops of the game's own slot frames at x 119..301 (what they cover is not
+        // available), so there the clean row above is repeated; below the last world row the last row is repeated too (it is faded to dark further down).
+        quad(0, 0, 800, split, 0, 0, uR, v216);
+        quad(0, split, xa, wBottom, 0, v216, ua, v220); quad(xa, split, xb, wBottom, ua, vrep, ub, vrep); quad(xb, split, 800, wBottom, ub, v216, uR, v220);
         glEnd();
+        glDisable(GL_TEXTURE_2D); glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        {   // Below the world there is nothing to show: a smooth fade from the average colour of a clean world row to dark, with no repeated pixels (so no streaks).
+            uint32_t ar = 0, ag = 0, ab = 0; for (int x = 0; x < hud::NAT_W; x++) { uint32_t p = gt->px[(size_t)(hud::SLOT_FRAME_Y0 - 1) * hud::TEX_W + x]; ar += p & 255; ag += p >> 8 & 255; ab += p >> 16 & 255; }
+            float cr = ar / (float)hud::NAT_W / 255.f, cg = ag / (float)hud::NAT_W / 255.f, cb = ab / (float)hud::NAT_W / 255.f, dark = 0.12f, soft = 14.f;
+            glBegin(GL_QUADS);
+            glColor4f(cr, cg, cb, 0); glVertex2f(X(0), Y(wBottom - soft)); glVertex2f(X(800), Y(wBottom - soft)); glColor4f(cr, cg, cb, 1); glVertex2f(X(800), Y(wBottom)); glVertex2f(X(0), Y(wBottom));       // soft top edge over the world's last rows
+            glColor4f(cr, cg, cb, 1); glVertex2f(X(0), Y(wBottom)); glVertex2f(X(800), Y(wBottom)); glColor4f(cr * dark, cg * dark, cb * dark, 1); glVertex2f(X(800), Y(480)); glVertex2f(X(0), Y(480));       // fade to dark
+            glEnd();
+        }
+        if (hud::showBar) {                                                          // the hotbar pieces cut from the game's own texture, drawn after the fade so they sit on top of it
+            glEnable(GL_TEXTURE_2D); glBlendFunc(GL_ONE, GL_ZERO); glColor4f(1, 1, 1, 1);
+            glBegin(GL_QUADS);
+        if (hud::showBar) {
+            for (int k = 0; k < hud::SLOTS; k++) {                                   // the live 18x18 interior of each slot (icon, count, cooldown) from the game's own frame
+                float gx = (float)(k * (hud::SL + hud::GAP) + hud::BORDER), sx = (float)(hud::SLOT_X0 + k * hud::SLOT_PITCH + hud::INT_REL_X);
+                gq(gx, (float)hud::BORDER, gx + hud::INT, (float)(hud::BORDER + hud::INT), sx / tw, hud::INT_Y0 / th, (sx + hud::INT) / tw, (hud::INT_Y0 + hud::INT) / th); }
+            gq(0, (float)hud::EXP_Y, (float)hud::LAB_W, (float)(hud::EXP_Y + hud::LAB_H), hud::LAB_X0 / tw, hud::LAB_Y0 / th, hud::LAB_X1 / tw, hud::LAB_Y1 / th);                    // EXP label
+            gq((float)hud::BAR_DX, (float)(hud::EXP_Y + hud::BAR_DY), (float)hud::GW, (float)(hud::EXP_Y + hud::BAR_DY + (hud::BAR_Y1 - hud::BAR_Y0)), hud::BAR_X0 / tw, hud::BAR_Y0 / th, hud::BAR_X1 / tw, hud::BAR_Y1 / th);   // EXP bar, fitted to the group width
+        }
+            glEnd();
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glDisable(GL_TEXTURE_2D);
+        }
+        if (hud::showBar) {                                                          // the thin two-tone slot borders: 1 px dark orange outside (corners cut), 1 px gold inside
+            auto solid = [&](uint32_t abgr) { glColor4ub(abgr & 255, abgr >> 8 & 255, abgr >> 16 & 255, 255); };
+            auto sq = [&](float gx0, float gy0, float gx1, float gy1) { float a = hud::groupX(gx0), b = hud::groupY(gy0), c = hud::groupX(gx1), d = hud::groupY(gy1); glVertex2f(X(a), Y(b)); glVertex2f(X(c), Y(b)); glVertex2f(X(c), Y(d)); glVertex2f(X(a), Y(d)); };
+            glBegin(GL_QUADS);
+            for (int pass = 0; pass < 2; pass++) { solid(pass ? hud::RING_GOLD : hud::RING_OUTER);
+                for (int k = 0; k < hud::SLOTS; k++) { float o = (float)(k * (hud::SL + hud::GAP)), e = (float)hud::SL, i0 = pass ? 1.f : 0.f;
+                    sq(o + i0 + (pass ? 0 : 1), i0, o + e - i0 - (pass ? 0 : 1), i0 + 1);                // top
+                    sq(o + i0 + (pass ? 0 : 1), e - i0 - 1, o + e - i0 - (pass ? 0 : 1), e - i0);          // bottom
+                    sq(o + i0, i0 + 1 + (pass ? 0 : 0), o + i0 + 1, e - i0 - 1);                           // left
+                    sq(o + e - i0 - 1, i0 + 1, o + e - i0, e - i0 - 1); } }                              // right
+            glEnd();
+        }
+        glColor4f(1, 1, 1, 1);
         x0 = ox; y0 = oy;                                                            // (the highlight / overlay code below uses the plain game-area rectangle)
     } else {
         glBegin(GL_QUADS); glTexCoord2f(0, 0); glVertex2f(x0, y0); glTexCoord2f(1, 0); glVertex2f(x1, y0); glTexCoord2f(1, 1); glVertex2f(x1, y1); glTexCoord2f(0, 1); glVertex2f(x0, y1); glEnd();

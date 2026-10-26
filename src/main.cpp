@@ -53,27 +53,39 @@ static int titleHighlightIndex() { if (!titleMenuShown()) return -1; int i = pee
 static bool composeSoft(std::vector<uint32_t>& dst) {
     const gl::Tex* gt = nullptr; for (auto& kv : gl::texs) if (kv.second.w == hud::TEX_W && kv.second.h == hud::NAT_H && !kv.second.px.empty()) { gt = &kv.second; break; }
     if (!gt) return false;
-    const float rs = (float)gl::rs, gx0 = hud::natToDesignX((float)hud::SLOT_X0), gy0 = hud::natToDesignY((float)hud::SLOT_Y0);
+    const float rs = (float)gl::rs, K = hud::K, wBottom = hud::WORLD_ROWS * hud::SY, top = 480.f - 10.f - hud::GH * K;
+    const int frameSpan = hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_FRAME_W;
     dst.resize((size_t)gl::fbW * gl::fbH);
+    auto T = [&](int x, int y) { return gt->px[(size_t)y * hud::TEX_W + x]; };
+    float cr = 0, cg = 0, cb = 0; for (int x = 0; x < hud::NAT_W; x++) { uint32_t p = T(x, hud::SLOT_FRAME_Y0 - 1); cr += p & 255; cg += p >> 8 & 255; cb += p >> 16 & 255; } cr /= hud::NAT_W; cg /= hud::NAT_W; cb /= hud::NAT_W;     // average colour of a clean world row, for the fade below the world
     for (int y = 0; y < gl::fbH; y++) {
-        float dy = (y + .5f) / rs; int ny = std::min(hud::WORLD_ROWS - 1, (int)(dy * hud::WORLD_ROWS / 480.f));
+        float dy = (y + .5f) / rs; bool strip = dy >= wBottom; int ny = strip ? hud::WORLD_ROWS - 1 : std::min(hud::WORLD_ROWS - 1, (int)(dy / hud::SY));
         for (int x = 0; x < gl::fbW; x++) {
-            float dx = (x + .5f) / rs; int nx = std::min(hud::NAT_W - 1, (int)(dx * hud::NAT_W / 800.f));
-            bool underFrames = ny >= hud::SLOT_Y0 && nx >= hud::SLOT_X0 && nx < hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_W;    // rows 216..219 there are the game's frame tops: repeat the clean row above
-            uint32_t px = gt->px[(size_t)(underFrames ? hud::SLOT_Y0 - 1 : ny) * hud::TEX_W + nx];
-            float sx = hud::SLOT_X0 + (dx - gx0) / hud::K, sy = hud::SLOT_Y0 + (dy - gy0) / hud::K;                  // position inside the cut-out group, in native pixels
-            if (sy >= hud::SLOT_Y0 && sx >= hud::SLOT_X0 && sx < hud::EXP_X1) {
-                int cx = (int)sx, cy = (int)sy, rel = (cx - hud::SLOT_X0) % hud::SLOT_PITCH, k = (cx - hud::SLOT_X0) / hud::SLOT_PITCH, row = cy - hud::SLOT_Y0;
-                bool slot = row < hud::SLOT_ROWS && k < hud::SLOTS && rel < hud::SLOT_W && rel >= hud::SIL_L[row] && rel <= hud::SIL_R[row];
-                bool exp = cy >= hud::EXP_Y0 && cy < hud::EXP_Y1 && cx >= hud::EXP_X0 && cx < hud::EXP_X1;
-                if (slot || exp) px = gt->px[(size_t)cy * hud::TEX_W + cx];
+            float dx = (x + .5f) / rs; int nx = std::min(hud::NAT_W - 1, (int)(dx / K));
+            int sy = (ny >= hud::SLOT_FRAME_Y0 && nx >= hud::SLOT_X0 && nx < frameSpan) ? hud::SLOT_FRAME_Y0 - 1 : ny;      // rows 216..219 there are the game's frame tops: repeat the clean row above
+            uint32_t px = T(nx, sy);
+            if (dy >= wBottom - 14.f) {                                                                                  // below the world: a smooth fade from the average world colour to dark (no repeated pixels); a soft edge over its last rows
+                float a = std::min(1.f, (dy - (wBottom - 14.f)) / 14.f), f = dy < wBottom ? 1.f : 1.f - 0.88f * (dy - wBottom) / (480.f - wBottom);
+                uint32_t r = (uint32_t)(((px & 255) * (1 - a) + cr * f * a)), g = (uint32_t)(((px >> 8 & 255) * (1 - a) + cg * f * a)), b = (uint32_t)(((px >> 16 & 255) * (1 - a) + cb * f * a)); px = r | g << 8 | b << 16; }
+            if (hud::showBar) {
+                float gx = (dx - 400.f) / K + hud::GW / 2.f, gy = (dy - top) / K;
+                if (gx >= 0 && gx < hud::GW && gy >= 0 && gy < hud::GH) {
+                    int k = (int)gx / (hud::SL + hud::GAP); float lx = gx - k * (hud::SL + hud::GAP);
+                    if (k < hud::SLOTS && lx < hud::SL && gy < hud::SL) {                                // a slot: live interior, thin gold ring, thin dark-orange outline
+                        int ix = (int)lx, iy = (int)gy, last = hud::SL - 1;
+                        if (ix >= hud::BORDER && ix < hud::BORDER + hud::INT && iy >= hud::BORDER && iy < hud::BORDER + hud::INT) px = T(hud::SLOT_X0 + k * hud::SLOT_PITCH + hud::INT_REL_X + ix - hud::BORDER, hud::INT_Y0 + iy - hud::BORDER);
+                        else if ((ix == 0 || ix == last) && (iy == 0 || iy == last)) { /* cut corner: world shows through */ }
+                        else px = (ix == 0 || iy == 0 || ix == last || iy == last) ? hud::RING_OUTER : hud::RING_GOLD;
+                    } else if (gy >= hud::EXP_Y && gy < hud::EXP_Y + hud::LAB_H && gx < hud::LAB_W) px = T(hud::LAB_X0 + (int)gx, hud::LAB_Y0 + (int)(gy - hud::EXP_Y));                          // EXP label
+                    else if (gx >= hud::BAR_DX && gy >= hud::EXP_Y + hud::BAR_DY && gy < hud::EXP_Y + hud::BAR_DY + (hud::BAR_Y1 - hud::BAR_Y0)) {                                                    // EXP bar, fitted to the group width
+                        int bx = hud::BAR_X0 + (int)((gx - hud::BAR_DX) * (hud::BAR_X1 - hud::BAR_X0) / (hud::GW - hud::BAR_DX)); px = T(std::min(bx, hud::BAR_X1 - 1), hud::BAR_Y0 + (int)(gy - hud::EXP_Y - hud::BAR_DY)); }
+                }
             }
             dst[(size_t)y * gl::fbW + x] = px | 0xff000000u;
         }
     }
     return true;
-}
-static const std::vector<uint32_t>& presentFb() {
+}static const std::vector<uint32_t>& presentFb() {
     gl::ensureFb();
     int idx = titleHighlightIndex(); bool hl = idx >= 0, comp = hud::enabled && hud::active;
     bool hint = g_hintBm && g_hintBm->x0 >= 0 && g_hintBm->x0 + g_hintBm->w <= gl::fbW && g_hintBm->y0 >= 0 && g_hintBm->y0 + g_hintBm->h <= gl::fbH;
@@ -337,7 +349,9 @@ static void usage() {
         "  --four-way       original 4-way movement (diagonals are on by default: two held directions alternate frame by frame)\n"
         "  --no-diag-boost  diagonals at about 0.7 of the straight-line speed instead of full speed\n"
         "  --hints <auto|off|kb|pad|mouse>   button hints at the bottom of menus (default auto: shows the input method you used last)\n"
-        "  --classic-hud    keep the original gameplay layout (tan bar along the bottom) instead of the centred hotbar over a full-height world\n"
+        "  --classic-hud    keep the original gameplay layout (tan bar along the bottom) instead of the compact centred hotbar\n"
+        "  --no-hotbar      hide the hotbar and EXP bar completely (the hotkeys and clicks still work)\n"
+        "  --square-pixels  gameplay world with square pixels (a little taller than the game's original proportions)\n"
         "  --soft           use the software renderer instead of the GPU (OpenGL) renderer\n"
         "  --no-strip-fix   turn off the repair of stray effect pixels left above the hotbar\n"
         "  --fps <n|auto>   frame rate limit: exact n without vsync, 0 = unlimited (default auto: about 60, vsync-aligned, e.g. 72 on a 144 Hz display)\n"
@@ -357,7 +371,7 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--classic-hud") hud::enabled = false; else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
+        else if (a == "--classic-hud") hud::enabled = false; else if (a == "--no-hotbar") hud::showBar = false; else if (a == "--square-pixels") hud::SY = hud::K; else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
         else if (a == "--hints") { std::string v = next(); g_hintsMode = v == "off" ? -2 : v == "kb" ? ov::KEYBOARD : v == "pad" ? ov::CONTROLLER : v == "mouse" ? ov::MOUSE : -1; }      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }

@@ -1,27 +1,40 @@
 // Re-laid-out gameplay HUD ("composed HUD"): while playing, the game's 384x256 picture is split into the world (rows 0..219) and the hotbar.
-// The world is stretched over the whole window (the baked-in tan bar is simply never shown) and only the five slot frames, with their icons / counts / cooldowns,
-// plus the EXP bar are cut out of the game's own framebuffer, live, and drawn centred at the bottom. Nothing is stored: every pixel comes from the frame the game just drew.
-// All numbers below are measured from the game's native 384x256 buffer.
+// The world is stretched over the whole window (the baked-in tan bar is simply never shown). From the game's own framebuffer, live, we cut out the 18x18 interior of each of
+// the five slots (icon, count, cooldown) and the EXP label and bar, and draw them in a compact group centred at the bottom with a thin two-tone border we draw ourselves.
+// Nothing is stored: every picture pixel comes from the frame the game just drew. All numbers below are measured from the game's native 384x256 buffer.
 namespace hud {
 static bool enabled = true;                  // --classic-hud turns the whole thing off
-static bool active = false;                  // set every frame by the game loop: true only while the gameplay HUD is on screen
+static bool showBar = true;                  // --no-hotbar hides the hotbar and EXP bar (the keys / clicks still work)
+static bool active = false;                  // set every frame by the game loop: true only while the composed layout applies
 static const int NAT_W = 384, NAT_H = 256, TEX_W = 512;      // the game's framebuffer and the texture it is copied into
 static const int WORLD_ROWS = 220;           // the game draws its world inside SetClip(0,0,384,220)
-static const int SLOTS = 5, SLOT_X0 = 119, SLOT_PITCH = 38, SLOT_W = 30, SLOT_Y0 = 216, SLOT_ROWS = 26;
-static const int EXP_X0 = 119, EXP_X1 = 298, EXP_Y0 = 242, EXP_Y1 = 251;      // EXP label + bar, x [X0, X1), y [Y0, Y1)
-// Inclusive left / right column (relative to a slot's left edge) of the frame's outline on each of its 26 rows: rounded top, square sides, slightly rounded bottom.
-static const int SIL_L[SLOT_ROWS] = {4, 2, 1, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0, 0, 1, 1};
-static const int SIL_R[SLOT_ROWS] = {25, 27, 28, 29,29,29,29,29,29,29,29,29,29,29,29,29,29,29,29,29,29,29, 29, 29, 28, 28};
-// Where the hotbar group goes in the 800x480 design space the rest of the host uses: centred, bottom edge 10 units above the bottom of the screen.
-static const float K = 800.f / NAT_W;                                     // design pixels per native pixel horizontally (the sprite is drawn with square pixels)
-static float natToDesignX(float nx) { return 400.f + (nx - (SLOT_X0 + (SLOTS - 1) * SLOT_PITCH + SLOT_W + SLOT_X0) / 2.f) * K; }      // group centred on the screen
-static float natToDesignY(float ny) { return 480.f - 10.f - (EXP_Y1 - SLOT_Y0) * K + (ny - SLOT_Y0) * K; }
+
+// Where things are in the game's own layout (native pixels).
+static const int SLOTS = 5, SLOT_X0 = 119, SLOT_PITCH = 38, SLOT_FRAME_W = 30, SLOT_FRAME_Y0 = 216;       // the original thick frames (their tops still sit in world rows 216..219)
+static const int INT_REL_X = 6, INT_Y0 = 222, INT = 18;                                                  // the 18x18 dark interior of a frame: x = frame x + 6, y = 222..239
+static const int LAB_X0 = 119, LAB_X1 = 137, LAB_Y0 = 243, LAB_Y1 = 250;                                  // "EXP" label box, x [X0, X1), y [Y0, Y1)
+static const int BAR_X0 = 138, BAR_X1 = 297, BAR_Y0 = 245, BAR_Y1 = 248;                                  // the EXP bar itself (black, with a white fill line)
+
+// The new group (units: native pixels, origin top-left of the group).
+static const int BORDER = 2, SL = INT + 2 * BORDER, GAP = 4;                                              // a slot is the interior plus a 1 px gold ring plus a 1 px dark-orange ring
+static const int GW = SLOTS * SL + (SLOTS - 1) * GAP;                                                     // group width
+static const int EXP_Y = SL + 3, LAB_H = LAB_Y1 - LAB_Y0, GH = EXP_Y + LAB_H;                              // EXP row under the slots; group height
+static const int LAB_W = LAB_X1 - LAB_X0, BAR_DX = LAB_W + 2, BAR_DY = 2;                                  // the bar starts just right of the label and is centred on it vertically
+static const uint32_t RING_OUTER = 0xff185594, RING_GOLD = 0xff41b6ee;                                   // ABGR: (148,85,24) dark orange, (238,182,65) gold
+
+static const float K = 800.f / NAT_W;                                    // design pixels per native pixel horizontally; the hotbar is drawn with square pixels at this scale
+static float SY = 480.f / NAT_H;                                         // design pixels per native row for the world: the game's own 1.875 (its pixels are slightly wide); --square-pixels makes it K
+static float groupX(float gx) { return 400.f + (gx - GW / 2.f) * K; }                                   // group centred on the screen,
+static float groupY(float gy) { return 480.f - 10.f - GH * K + gy * K; }                                  // 10 design pixels above the bottom edge
+
 // Mouse / touch position in 800x480 design space -> the position the game expects (also 800x480 design space, as if the screen were laid out the original way).
 static void unmapTouch(float& x, float& y) {
-    float gx0 = natToDesignX((float)SLOT_X0), gx1 = natToDesignX((float)(SLOT_X0 + (SLOTS - 1) * SLOT_PITCH + SLOT_W)), gy0 = natToDesignY((float)SLOT_Y0), gy1 = natToDesignY((float)EXP_Y1);
-    if (x >= gx0 && x < gx1 && y >= gy0 && y < gy1) {                    // on the hotbar: back to where that slot is in the game's own layout
-        float nx = SLOT_X0 + (x - gx0) / K, ny = SLOT_Y0 + (y - gy0) / K; x = nx * 800.f / NAT_W; y = ny * 480.f / NAT_H; return;
+    float gx = (x - 400.f) / K + GW / 2.f, gy = (y - (480.f - 10.f - GH * K)) / K;
+    if (showBar && gx >= 0 && gx < GW && gy >= 0 && gy < GH) {           // on the hotbar group
+        for (int k = 0; k < SLOTS; k++) if (gx >= k * (SL + GAP) && gx < k * (SL + GAP) + SL && gy < SL) {          // on slot k: the middle of that slot in the game's own layout
+            x = (SLOT_X0 + k * SLOT_PITCH + SLOT_FRAME_W / 2) * 800.f / NAT_W; y = (INT_Y0 + INT / 2) * 480.f / NAT_H; return; }
+        x = 60.f * 800.f / NAT_W; y = 245.f * 480.f / NAT_H; return;       // between the slots / on the EXP bar: an empty spot of the original panel, so nothing happens
     }
-    y = y * WORLD_ROWS / (float)NAT_H;                                   // world: it was stretched from 220 rows to the full height (x is unchanged)
+    y = y / SY * 480.f / NAT_H;                                          // world: native row = y / SY here, the game's own layout scales rows by 480/256 (identical unless --square-pixels; x is unchanged)
 }
 }  // namespace hud

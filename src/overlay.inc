@@ -122,6 +122,21 @@ static const Bitmap* get(Ctx ctx, Dev dev, Pad pad, int fbW, int fbH) {
     float s0 = fbW / 800.f, s = s0 * 1.2f; int H = std::max(10, (int)lroundf(38 * s0)); float cy = H / 2.f, gap = 22 * s, inner = 7 * s, pad2 = 20 * s0;
     Bitmap scratch; Canvas dry{&scratch, true, s, std::max(1, (int)lroundf(2.0f * s0))};            // icons scale with s, text with whole-pixel font cells
     auto hs = hints(ctx, dev);
+    if (ctx == SHOP) {                                                                           // the shop's hints are stacked top to bottom (bottom right, just above the bar, which starts at y = 405)
+        int rowH = (int)lroundf(32 * s0), vpad = (int)lroundf(7 * s0), n = (int)hs.size(), maxIcon = 0, maxLabel = 0;
+        auto iconsW = [&](const Hint& x) { int w = drawIcon(dry, 0, rowH / 2.f, x.i1, x.key, pad); if (x.i2) w += (int)inner + drawIcon(dry, 0, rowH / 2.f, x.i2, x.key, pad); return w; };
+        for (auto& x : hs) { maxIcon = std::max(maxIcon, iconsW(x)); maxLabel = std::max(maxLabel, dry.textW(x.label)); }
+        bm.w = std::min(fbW, (int)pad2 + maxIcon + (int)inner + maxLabel + (int)pad2); bm.h = n * rowH + 2 * vpad; bm.key = key; bm.px.assign((size_t)bm.w * bm.h, 0);
+        int margin2 = (int)lroundf(8 * s0); bm.x0 = fbW - bm.w - margin2; bm.y0 = std::max(0, (int)lroundf(400 * s0) - bm.h);
+        Canvas cv{&bm, false, s, dry.tp};
+        cv.rrect(0, 0, (float)bm.w, (float)bm.h, 10 * s0, 0xff000000, 0.72f, std::max(1.f, s0), 0xff606060);
+        for (int i = 0; i < n; i++) {
+            float cyr = vpad + i * rowH + rowH / 2.f; int x = (int)pad2 / 2 + (int)(pad2 / 2);
+            x += drawIcon(cv, x, cyr, hs[i].i1, hs[i].key, pad); if (hs[i].i2) drawIcon(cv, x + (int)inner, cyr, hs[i].i2, hs[i].key, pad);
+            cv.text((int)pad2 + maxIcon + (int)inner, (int)(cyr - 3.5f * cv.tp), hs[i].label, WHITE);        // labels line up in one column
+        }
+        return &bm;
+    }
     auto itemW = [&](const Hint& x) { int w = drawIcon(dry, 0, cy, x.i1, x.key, pad); if (x.i2) w += (int)inner + drawIcon(dry, 0, cy, x.i2, x.key, pad); return w + (int)inner + dry.textW(x.label); };
     int total = 0; for (size_t i = 0; i < hs.size(); i++) total += itemW(hs[i]) + (i ? (int)gap : 0);
     bm.w = std::min(fbW, total + 2 * (int)pad2); bm.h = H; bm.key = key; bm.px.assign((size_t)bm.w * H, 0);

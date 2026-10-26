@@ -370,7 +370,7 @@ int main(int argc, char** argv) {
         bool wasActive = stickDir != -1; int thr = wasActive ? 12000 : 18000;           // hysteresis
         if (mag > thr) {
             int h = ax > 0 ? 61 : 60, v = ay > 0 ? 59 : 58;
-            bool diag = g_eightWay && inGameplay() && std::min(abs(ax), abs(ay)) * 1000 > std::max(abs(ax), abs(ay)) * 433;
+            bool diag = g_eightWay && inGameplay() && std::min(abs(ax), abs(ay)) * 1000 > std::max(abs(ax), abs(ay)) * 414;      // tan(22.5 deg): a 45 degree wedge around each diagonal
             if (diag) { want = h; wantV = v; } else want = abs(ax) > abs(ay) ? h : v;
         }
         if (stickDir != -1 && stickDir != want) inputKey(stickDir, false);

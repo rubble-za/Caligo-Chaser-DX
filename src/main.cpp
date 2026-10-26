@@ -52,7 +52,11 @@ static std::vector<uint32_t> g_presentTmp;
 static const ov::Bitmap* g_hintBm = nullptr;                                      // input-hint strip to show on this frame (null = none), see overlay.inc
 // The title menu is state 4, but for its first frames (g_nTitleToMainFra counting 0..10) the previous screen is still showing.
 static bool titleMenuShown() { return peekInt("nState") == 4 && peekInt("g_nTitleToMainFra") >= 10; }
-static int titleHighlightIndex() { if (!titleMenuShown()) return -1; int i = peekInt("g_nMenuIndex"); return i >= 0 && i <= 2 ? i : -1; }
+static int titleHighlightIndex() {
+#ifdef __ANDROID__
+    return -1;                                                                  // touch only: no controller/keyboard selection box
+#endif
+    if (!titleMenuShown()) return -1; int i = peekInt("g_nMenuIndex"); return i >= 0 && i <= 2 ? i : -1; }
 // Composed gameplay HUD in software (also used for screenshots): the same picture hw::present draws with OpenGL, built from the CPU copy of the game's texture. See hud.inc.
 static bool composeSoft(std::vector<uint32_t>& dst) {
     const gl::Tex* gt = nullptr; for (auto& kv : gl::texs) if (kv.second.w == hud::TEX_W && kv.second.h == hud::NAT_H && !kv.second.px.empty()) { gt = &kv.second; break; }
@@ -386,7 +390,7 @@ int main(int argc, char** argv) {
     }
 #ifdef __ANDROID__
     {   // Android: everything lives in the app's own folder (Android/data/<package>/files), which the user can fill with a file manager or adb: the APK plus the Com2uS folder; saves go next to them
-        g_hideTouchUi = false; hud::enabled = false; g_hintsMode = -2;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
+        g_hideTouchUi = false; hud::enabled = false; g_hintsMode = -2; fullscreen = true;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
         const char* ext = SDL_AndroidGetExternalStoragePath(); const char* inr = SDL_AndroidGetInternalStoragePath(); std::string base = ext ? ext : "/sdcard";
         { std::error_code e0; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e0)) base = inr; }          // files copied in with adb (or a file manager that cannot write into Android/data) live in the private folder instead
         if (g_dataRoot == ".") g_dataRoot = base; if (g_saveRoot == "save") g_saveRoot = base + "/save";
@@ -408,6 +412,9 @@ int main(int argc, char** argv) {
     Uint32 initFlags = SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER;
     bool wantHw = !softFlag && ((!hl && runSeconds <= 0) || gpuFlag);
     if (hl || runSeconds > 0) { if (!wantHw) SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy"); SDL_SetHint(SDL_HINT_AUDIODRIVER, "dummy"); }   // self-test modes never open a real window (except --gpu)
+#ifdef __ANDROID__
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+#endif
     if (SDL_Init(initFlags) != 0) { fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError()); return 1; }
 
     bootHost(lib);
@@ -586,6 +593,12 @@ int main(int argc, char** argv) {
                 int gk = gameKeyFromSdl(e.key.keysym.scancode); if (gk == -1) gk = gameKeyFromAndroid(androidKeyFromSdl(e.key.keysym.scancode));
                 inputKey(gk, e.type == SDL_KEYDOWN);
                 break; }
+            case SDL_FINGERDOWN: case SDL_FINGERUP: case SDL_FINGERMOTION: {                        // phone: one finger acts as the left mouse button (the game only knows one touch). SDL's own touch-to-mouse events are switched off: this phone also sent stray motion events at (0,0)
+                static SDL_FingerID cur = -1; if (e.type == SDL_FINGERDOWN && cur == -1) cur = e.tfinger.fingerId; if (e.tfinger.fingerId != cur) break; if (e.type == SDL_FINGERUP) cur = -1;
+                int ww = 1, wh = 1; SDL_GetWindowSize(win, &ww, &wh); SDL_Event m{}; m.type = e.type == SDL_FINGERDOWN ? SDL_MOUSEBUTTONDOWN : e.type == SDL_FINGERUP ? SDL_MOUSEBUTTONUP : SDL_MOUSEMOTION;
+                int px = (int)(e.tfinger.x * ww), py = (int)(e.tfinger.y * wh);
+                if (m.type == SDL_MOUSEMOTION) { m.motion.x = px; m.motion.y = py; m.motion.xrel = 99; } else { m.button.button = SDL_BUTTON_LEFT; m.button.x = px; m.button.y = py; }
+                SDL_PushEvent(&m); break; }
             case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP: case SDL_MOUSEMOTION: {
                 if (e.type == SDL_MOUSEMOTION ? abs(e.motion.xrel) + abs(e.motion.yrel) >= 4 : true) g_inDev = ov::MOUSE;      // clicks and real movement, not a resting cursor
                 if (e.type != SDL_MOUSEMOTION && e.button.button == SDL_BUTTON_RIGHT) { inputKey(73, e.type == SDL_MOUSEBUTTONDOWN); break; }   // right click = Back

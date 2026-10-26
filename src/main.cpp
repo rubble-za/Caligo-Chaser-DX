@@ -23,6 +23,7 @@ static bool savePng(const std::string& path) {
 
 static bool g_wlog = false;
 static void onMemWrite(uc_engine*, uc_mem_type, uint64_t addr, int size, int64_t value, void*) {
+    if (g_fbRow220 && g_stripFix && size <= 8) { uint8_t nb[8]; for (int i = 0; i < size; i++) nb[i] = (uint8_t)((uint64_t)value >> (8 * i)); stripWrite((uint32_t)addr, nb, (uint32_t)size); }   // bottom-strip repair, see imports.inc
     static long wa = getenv("CC_WADDR") ? (long)strtoul(getenv("CC_WADDR"), nullptr, 16) : -1;
     if (wa >= 0) { if ((uint32_t)addr >= LIB_BASE + (uint32_t)wa && (uint32_t)addr < LIB_BASE + (uint32_t)wa + 4) fprintf(stderr, "WA f=%lld val=%lld pc=lib+%x now=%lld\n", (long long)g_nowMs, (long long)value, reg(PC) - LIB_BASE, (long long)g_nowMs); return; }
     if (!g_wlog || size > 4 || (uint64_t)value > 300) return;
@@ -210,6 +211,22 @@ static bool inGameplay() {
 }
 static void audioCallback(void*, Uint8* stream, int len) { audio::mix((int16_t*)stream, len / 4); }
 
+// Frame limiter: SDL_Delay is only accurate to the system timer tick on Windows (15.6 ms on recent versions), so use a high-resolution waitable timer there and spin for the last ~1 ms.
+static void sleepUntil(Uint64 target, Uint64 freq) {
+#ifdef _WIN32
+    static HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, 0x2 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
+#endif
+    for (;;) {
+        Uint64 nc = SDL_GetPerformanceCounter(); if (nc >= target) return;
+        double ms = (double)(target - nc) * 1000.0 / (double)freq;
+        if (ms <= 1.5) continue;                                                      // spin
+#ifdef _WIN32
+        if (timer) { LARGE_INTEGER due; due.QuadPart = -(long long)((ms - 1.0) * 10000.0); SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE); WaitForSingleObject(timer, 100); continue; }
+#endif
+        SDL_Delay((Uint32)(ms - 1.0));
+    }
+}
+
 static void usage() {
     fprintf(stderr,
         "Caligo Chaser host\n"
@@ -222,12 +239,14 @@ static void usage() {
         "  --filter nearest|smooth   texture filtering (default nearest = crisp pixels, best at --res 1600x960 / 2400x1440; smooth = bilinear)\n"
         "  --res WxH        render resolution, e.g. 1920x1080 (default 1600x960; use 800x480 for the original size on slower PCs; layout is kept, picture is rendered larger)\n"
         "  --soft           use the software renderer instead of the GPU (OpenGL) renderer\n"
+        "  --no-strip-fix   turn off the repair of stray effect pixels left above the hotbar\n"
+        "  --fps <n>        frame rate limit (default 60, 0 = unlimited)\n"
         "  --fullscreen     start fullscreen (F11 toggles, F12 saves a screenshot)\n"
         "Testing: --headless <frames> [--script \"400:tap:400:240;...\"] [--dump-every N --dump-dir D] [--trace]\n");
 }
 
 int main(int argc, char** argv) {
-    std::string apk, script, inject, dumpDir = "frames"; double runSeconds = 0; int headless = -1, dumpEvery = 0, scale = 1; bool fullscreen = false, softFlag = false, gpuFlag = false;
+    std::string apk, script, inject, dumpDir = "frames"; double runSeconds = 0; int headless = -1, dumpEvery = 0, scale = 1; bool fullscreen = false, softFlag = false, gpuFlag = false; int fpsCap = 60;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i]; auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
         if (a == "--apk") apk = next(); else if (a == "--data") g_dataRoot = next(); else if (a == "--save") g_saveRoot = next();
@@ -238,7 +257,7 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
+        else if (a == "--fps") fpsCap = std::max(0, atoi(next().c_str())); else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
@@ -266,6 +285,10 @@ int main(int argc, char** argv) {
     if (wantHw) {                                                  // GPU renderer: OpenGL window + offscreen framebuffer; falls back to software if anything is missing
         win = SDL_CreateWindow("Caligo Chaser", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags | SDL_WINDOW_OPENGL | (hl ? SDL_WINDOW_HIDDEN : 0));
         if (!win || !gl::hw::init(win)) { if (win) SDL_DestroyWindow(win); win = nullptr; fprintf(stderr, "GPU renderer unavailable, using the software renderer\n"); }
+        else if (fpsCap == 60) {                                   // a display refreshing at an exact multiple of 60 Hz paces the game by itself: swap every Nth vblank
+            SDL_DisplayMode dm; int di = SDL_GetWindowDisplayIndex(win);
+            if (di >= 0 && SDL_GetCurrentDisplayMode(di, &dm) == 0 && dm.refresh_rate >= 60 && dm.refresh_rate % 60 == 0) SDL_GL_SetSwapInterval(dm.refresh_rate / 60);
+        }
     }
     if (!hl) {
         if (!win) {
@@ -351,6 +374,7 @@ int main(int argc, char** argv) {
         inputReleaseAll(); lb = false; for (int& d : dpadSent) d = -1; stickDir = -1;
     };
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+    const Uint64 perfFreq = SDL_GetPerformanceFrequency(); Uint64 nextFrame = SDL_GetPerformanceCounter();
     while (running && !g_wantQuit) {
         SDL_Event e; int64_t now = gameClock();
         if (runSeconds > 0 && now > (int64_t)(runSeconds * 1000)) break;
@@ -414,8 +438,12 @@ int main(int argc, char** argv) {
                 SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
                 SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr); SDL_RenderPresent(ren);
             }
-            SDL_Delay(1);
-        } else SDL_Delay(50);
+            if (fpsCap > 0) {                                                       // frame limiter: sleep most of the remaining time, spin for the last millisecond
+                nextFrame += perfFreq / fpsCap; Uint64 nc = SDL_GetPerformanceCounter();
+                if (nc > nextFrame + perfFreq / 20) nextFrame = nc;                  // fell far behind (stall, window drag): don't try to catch up
+                else sleepUntil(nextFrame, perfFreq);
+            } else SDL_Delay(1);
+        } else { SDL_Delay(50); nextFrame = SDL_GetPerformanceCounter(); }
     }
     if (runSeconds > 0) fprintf(stderr, "self-test: %llu frames in %.1fs (%.1f fps)\n", (unsigned long long)frameCount, runSeconds, frameCount / runSeconds);
     if (adev) SDL_CloseAudioDevice(adev);

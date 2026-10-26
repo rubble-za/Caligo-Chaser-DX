@@ -66,6 +66,7 @@ static uint32_t convertPixel(const uint8_t* p, uint32_t fmt, uint32_t type) {
 }
 static void uploadRegion(Tex& t, int xo, int yo, int w, int h, uint32_t fmt, uint32_t type, uint32_t src) {
     if (!src) return;
+    if (t.w == 512 && t.h == 256 && xo == 0 && yo == 0 && w == 512 && h == 256 && type == US565) g_texBase = src;      // the game's framebuffer texture (see imports.inc)
     t.dirty = true; t.gpuOnly = false;
     int bpp = bytesPerPixel(fmt, type), rowBytes = (w * bpp + 3) & ~3;       // GL_UNPACK_ALIGNMENT = 4
     std::vector<uint8_t> buf((size_t)rowBytes * h); rdbuf(src, buf.data(), buf.size());

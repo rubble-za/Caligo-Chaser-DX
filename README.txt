@@ -40,6 +40,9 @@ CONTROLS
   Renderer: the game is drawn on your graphics card through OpenGL. If OpenGL is not available the program says so and falls
   back to the built-in software renderer automatically (that one needs a fast CPU; --res 800x480 helps). --soft forces the
   software renderer.
+  Frame rate: limited to 60 fps, which is all the game's animation uses (--fps <n> changes it, --fps 0 removes the limit).
+  Stray effect pixels the original game leaves above the hotbar after low attacks are cleaned up automatically
+  (--no-strip-fix turns that off).
 
 SAVES
   Written to the "save" folder next to the program (your original data folder is never modified).

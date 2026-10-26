@@ -387,17 +387,18 @@ int main(int argc, char** argv) {
 #ifdef __ANDROID__
     {   // Android: everything lives in the app's own folder (Android/data/<package>/files), which the user can fill with a file manager or adb: the APK plus the Com2uS folder; saves go next to them
         g_hideTouchUi = false; hud::enabled = false; g_hintsMode = -2;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
-        const char* ext = SDL_AndroidGetExternalStoragePath(); std::string base = ext ? ext : "/sdcard";
+        const char* ext = SDL_AndroidGetExternalStoragePath(); const char* inr = SDL_AndroidGetInternalStoragePath(); std::string base = ext ? ext : "/sdcard";
+        { std::error_code e0; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e0)) base = inr; }          // files copied in with adb (or a file manager that cannot write into Android/data) live in the private folder instead
         if (g_dataRoot == ".") g_dataRoot = base; if (g_saveRoot == "save") g_saveRoot = base + "/save";
         if (apk.empty()) { std::error_code ec; for (auto& e : std::filesystem::directory_iterator(base, ec)) if (e.path().extension() == ".apk") { apk = e.path().string(); break; } }
-        if (apk.empty() || !std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr")) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Caligo Chaser", ("Copy your APK and the Com2uS folder into:\n" + base).c_str(), nullptr); return 1; }
+        std::error_code ec2; if (apk.empty() || !std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr", ec2)) { SDL_Log("base=%s apk=%s ec=%s", base.c_str(), apk.c_str(), ec2.message().c_str()); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Caligo Chaser", ("Copy your APK and the Com2uS folder into:\n" + base).c_str(), nullptr); return 1; }
     }
 #endif
     if (apk.empty()) { std::error_code ec; for (auto& e : std::filesystem::directory_iterator(".", ec)) if (e.path().extension() == ".apk") { apk = e.path().string(); break; } }
     if (apk.empty()) { fprintf(stderr, "No APK found. Pass --apk <CaligoChaser.apk> or put it next to this program.\n"); usage(); return 1; }
     std::string err; if (!apkOpen(apk, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
     std::vector<uint8_t> lib; if (!apkRead("lib/armeabi/libgame.so", lib)) { fprintf(stderr, "lib/armeabi/libgame.so not found inside the APK\n"); return 1; }
-    if (!std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr")) {
+    if (std::error_code ec3; !std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr", ec3)) {
         fprintf(stderr, "Game data not found: expected %s/Com2uS/com.com2us.caligo/resources.csr\nPass --data <folder containing Com2uS/>.\n", g_dataRoot.c_str()); return 1;
     }
 

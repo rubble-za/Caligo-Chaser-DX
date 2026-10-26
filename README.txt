@@ -1,5 +1,5 @@
-CALIGO CHASER - desktop port (phase 1: faithful 1:1)
-=====================================================
+CALIGO CHASER - PC port
+=======================
 This runs the ORIGINAL game code from your own APK, with the Android parts re-implemented natively
 (window, input, audio, a software OpenGL ES renderer). Nothing is converted or re-drawn, so it plays like the original.
 
@@ -10,10 +10,7 @@ WINDOWS
   2. Double-click CaligoChaser.exe.  (A console window shows log messages; ignore it.)
   Options (run from a command prompt):  --apk <file>  --data <folder that contains Com2uS>  --save <folder>  --scale 2  --fullscreen
 
-LINUX
-  linux/CaligoChaser (x86-64, built on a recent glibc). Same folder layout and options.
-
-CONTROLS (phase 2)
+CONTROLS
   Mouse         left button = finger: tap to walk/attack/press buttons, drag the on-screen movement ring
   Keyboard      Arrow keys = move (added for the desktop). The original bindings also work - they follow the game's own
                 "QWERTY keyboard Compatible" chart, shown the first time you start:
@@ -35,15 +32,12 @@ CONTROLS (phase 2)
   Aim steering (on by default): when you attack, the hero turns toward the left/right direction you are holding, even in the
   middle of a mashed combo (the game normally only turns you when idle or walking). --no-aim-steer turns it off.
   --aim-follow (experimental, off by default) restarts an attack when you change direction while holding the action button.
-  SAVES: slots are written as hero_data_N / game_data_N in the save folder. Earlier builds corrupted these on Windows
-  (text-mode file writes), so saves made with builds before phase 2d must be made again.
   Pixel filtering: nearest-neighbour (hard, crisp pixels) is the default. It looks best at whole-number scales such as
   --res 1600x960 or 2400x1440; at other window sizes some pixel rows/columns can look slightly uneven.
   --filter smooth brings back the original bilinear (soft) look.
-  Resolution: CaligoChaser.exe --res 1920x1080   renders the game larger (layout is unchanged, picture is sharper and the
-  window is letter-boxed to the game's 5:3 shape). Needs a fast CPU: the renderer is software-based. Default is 800x480.
-  CC_DEBUG_STATE=1 logs state/input.
-  A mouse/keyboard/controller-friendly menu layer is still to come.
+  Resolution: the game renders at 1600x960 by default (the layout is unchanged, the picture is sharper and the window is
+  letter-boxed to the game's 5:3 shape). The renderer is software-based, so it needs a reasonably fast CPU. If the game runs
+  slowly, use --res 800x480 (the original size). Larger sizes work too, e.g. --res 1920x1080 or --res 2400x1440.
 
 SAVES
   Written to the "save" folder next to the program (your original data folder is never modified).
@@ -59,4 +53,3 @@ TITLE MENU
 
 KNOWN LIMITS (this build)
   - Text-input fields (player names for online features) are not wired yet.
-  - Dash-by-trigger has only been checked by simulation; please report anything odd.

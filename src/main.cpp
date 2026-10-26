@@ -218,7 +218,7 @@ static void usage() {
         "  --aim-follow     (experimental) restart an attack when you change direction while holding the action button\n"
         "  --touch-ui       keep the on-screen d-pad and action buttons (hidden by default)\n"
         "  --filter nearest|smooth   texture filtering (default nearest = crisp pixels, best at --res 1600x960 / 2400x1440; smooth = bilinear)\n"
-        "  --res WxH        render resolution, e.g. 1920x1080 (default 800x480; layout is kept, picture is rendered larger)\n"
+        "  --res WxH        render resolution, e.g. 1920x1080 (default 1600x960; use 800x480 for the original size on slower PCs; layout is kept, picture is rendered larger)\n"
         "  --fullscreen     start fullscreen (F11 toggles, F12 saves a screenshot)\n"
         "Testing: --headless <frames> [--script \"400:tap:400:240;...\"] [--dump-every N --dump-dir D] [--trace]\n");
 }

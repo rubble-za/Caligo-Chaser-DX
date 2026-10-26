@@ -30,7 +30,7 @@ static Mat mvM = identity(), prM = identity(), txM = identity(); static uint32_t
 static VA vtx, col, nrm, tc;
 static float curColor[4] = {1, 1, 1, 1}, clearColor[4] = {0, 0, 0, 0};
 static bool forceNearest = true;   // nearest-neighbour sampling by default; --filter smooth restores bilinear
-static float rs = 1.f;                                   // render scale: the game still draws a 800x480 world, we rasterise it rs times larger
+static float rs = 2.f;                              // render scale: the game still draws a 800x480 world, we rasterise it rs times larger
 static int vpX = 0, vpY = 0, vpW = 800, vpH = 480, scX = 0, scY = 0, scW = 800, scH = 480;
 static bool enTex = false, enBlend = false, enScissor = false;
 static uint32_t srcF = 1, dstF = 0, texMode = MODULATE;

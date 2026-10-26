@@ -6,5 +6,5 @@ Components built into the executable:
   SDL 2.30.9 .................. zlib
   miniz 3.0.2 ................. MIT
   stb_vorbis .................. public domain / MIT
-The host code in "source" (main.cpp, host.cpp, *.inc) is offered under GPL-2.0-or-later.
+The host code in the repository's src folder (main.cpp, host.cpp, *.inc) is offered under GPL-2.0-or-later.
 Caligo Chaser and its assets belong to Com2uS; use only copies you are entitled to use.

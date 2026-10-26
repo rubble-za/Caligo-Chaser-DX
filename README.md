@@ -21,7 +21,7 @@ The game also needs the port's own executable (`CaligoChaser.exe` on Windows, `C
 
 - Controller support: D-pad hotkeys in play, menu navigation otherwise, triggers to dash, Start for the menu
 - Keyboard and mouse support
-- Resizable window, resolutions up to 1920x1080 (`--res`), crisp nearest-neighbour pixel scaling by default (`--filter smooth` restores bilinear)
+- Resizable window, renders at 1600x960 by default (`--res` to change, e.g. `--res 800x480` for slower PCs or `--res 1920x1080`), crisp nearest-neighbour pixel scaling by default (`--filter smooth` restores bilinear)
 - On-screen touch buttons hidden by default (`--touch-ui` brings them back)
 - Light-blue highlight on the title menu selection
 - Online mode and "More Games" removed (the servers no longer exist)

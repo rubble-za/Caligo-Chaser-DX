@@ -326,6 +326,22 @@ static void drawLine(const V& a, const V& b) {                                  
     rasterTri(a0, a1, b0); rasterTri(a1, b1, b0);
 }
 
+// Fast presentation: when a frame is nothing but the game's one full-screen quad textured with its 512x256 framebuffer texture (which is what the game does every frame), drawing it into the
+// 800x480 framebuffer is skipped and the quad is remembered instead; the presenter then scales the texture on the GPU. Anything that needs the real framebuffer (another draw, copying it
+// into a texture, a screenshot) calls flushQuad() first, which draws the remembered quad the ordinary way.
+static uint64_t g_quadHit = 0, g_quadMiss = 0;
+struct PendingQuad { bool on = false; uint32_t tex = 0, mode = 0; int count = 0; V v[6]; uint32_t texMode = MODULATE; float u0 = 0, v0 = 0, u1 = 0, v1 = 0; };
+static PendingQuad g_quad; static bool g_fastQuad = false;
+static void flushQuad() {                                                        // draw the remembered quad exactly as drawImpl would have
+    if (!g_quad.on) return; g_quad.on = false;
+    uint32_t sTex = boundTex, sMode = texMode; bool sEn = enTex, sBl = enBlend, sSc = enScissor;
+    boundTex = g_quad.tex; texMode = g_quad.texMode; enTex = true; enBlend = false; enScissor = false;
+    const V* q = g_quad.v;
+    if (g_quad.mode == 5) { drawTri(q[0], q[1], q[2]); drawTri(q[1], q[2], q[3]); }
+    else if (g_quad.mode == 6) { drawTri(q[0], q[1], q[2]); drawTri(q[0], q[2], q[3]); }
+    else { drawTri(q[0], q[1], q[2]); drawTri(q[3], q[4], q[5]); }
+    boundTex = sTex; texMode = sMode; enTex = sEn; enBlend = sBl; enScissor = sSc;
+}
 static double drawSeconds = 0;
 static void drawImpl(uint32_t mode, int first, int count, const std::vector<uint32_t>* indices);
 static void draw(uint32_t mode, int first, int count, const std::vector<uint32_t>* indices) {
@@ -353,7 +369,22 @@ static void drawImpl(uint32_t mode, int first, int count, const std::vector<uint
         return v;
     };
     auto idx = [&](int k) { return indices ? (int)(*indices)[k] : first + k; };
-    switch (mode) {
+    if (g_fastQuad && !enBlend && !enScissor && enTex && !col.en && (texMode == REPLACE || texMode == MODULATE) && curColor[0] > .999f && curColor[1] > .999f && curColor[2] > .999f && curColor[3] > .999f
+        && ((mode == 5 && count == 4) || (mode == 6 && count == 4) || (mode == 4 && count == 6)) && vpX == 0 && vpY == 0 && vpW == fbW && vpH == fbH) {
+        auto it = texs.find(boundTex);
+        if (it != texs.end() && it->second.w == 512 && it->second.h == 256 && !it->second.px.empty() && (it->second.magF != LINEAR || forceNearest)) {
+            PendingQuad g_quadTmp; float U[2] = {0, 0}, W[2] = {0, 0}; bool setU[2] = {false, false}, setV[2] = {false, false}, ok = true; int mask = 0;
+            for (int k = 0; k < count && ok; k++) {
+                V pv = vert(idx(k)); g_quadTmp.v[k] = pv; SV s = toScreen(pv); int xs = s.X == 0 ? 0 : s.X == (int64_t)fbW * 16 ? 1 : -1, ys = s.Y == 0 ? 0 : s.Y == (int64_t)fbH * 16 ? 1 : -1;
+                if (xs < 0 || ys < 0) { ok = false; break; }
+                if (setU[xs] && U[xs] != s.u) ok = false; if (setV[ys] && W[ys] != s.v) ok = false;
+                U[xs] = s.u; setU[xs] = true; W[ys] = s.v; setV[ys] = true; mask |= 1 << (xs + 2 * ys);
+            }
+            if (ok && mask == 15) { g_quad = g_quadTmp; g_quad.on = true; g_quad.mode = mode; g_quad.count = count; g_quad.texMode = texMode; g_quad.tex = boundTex; g_quad.u0 = U[0]; g_quad.u1 = U[1]; g_quad.v0 = W[0]; g_quad.v1 = W[1]; trisDrawn += 2; g_quadHit++; return; }
+        }
+    }
+    if (g_fastQuad) { g_quadMiss++; static int shown = 0; if (shown++ < 6 && getenv("CC_QUADSTAT")) fprintf(stderr, "[quad] miss: mode=%u count=%d blend=%d scissor=%d tex=%d col=%d texMode=%x color=%.2f,%.2f,%.2f,%.2f vp=%d,%d,%d,%d fb=%dx%d boundTex=%u\n", mode, count, (int)enBlend, (int)enScissor, (int)enTex, (int)col.en, texMode, curColor[0], curColor[1], curColor[2], curColor[3], vpX, vpY, vpW, vpH, fbW, fbH, boundTex); }
+    flushQuad();    switch (mode) {
     case 4: for (int k = 0; k + 2 < count; k += 3) drawTri(vert(idx(k)), vert(idx(k + 1)), vert(idx(k + 2))); break;               // TRIANGLES
     case 5: for (int k = 0; k + 2 < count; k++) drawTri(vert(idx(k)), vert(idx(k + 1)), vert(idx(k + 2))); break;                 // TRIANGLE_STRIP
     case 6: for (int k = 1; k + 1 < count; k++) drawTri(vert(idx(0)), vert(idx(k)), vert(idx(k + 1))); break;                     // TRIANGLE_FAN
@@ -389,7 +420,7 @@ static void registerGL() {
     auto I = [](const char* n, std::function<void()> f) { g_impl[n] = f; };
     I("glClearColor",  [] { for (int i = 0; i < 4; i++) clearColor[i] = argf(i); });
     I("glClearColorx", [] { for (int i = 0; i < 4; i++) clearColor[i] = fx(arg(i)); });
-    I("glClear", [] { ensureFb(); if (hw::on) { if (arg(0) & 0x4000) hw::clear(); return; } if (arg(0) & 0x4000) { uint32_t c = pack(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+    I("glClear", [] { ensureFb(); if (g_quad.on) { if (!enScissor && (arg(0) & 0x4000)) g_quad.on = false; else flushQuad(); } if (hw::on) { if (arg(0) & 0x4000) hw::clear(); return; } if (arg(0) & 0x4000) { uint32_t c = pack(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
                          if (enScissor) { for (int y = std::max(0, fbH - (scY + scH)); y < std::min(fbH, fbH - scY); y++) for (int x = std::max(0, scX); x < std::min(fbW, scX + scW); x++) fb[(size_t)y * fbW + x] = c; }
                          else std::fill(fb.begin(), fb.end(), c); } });
     I("glViewport", [] { vpX = (int)lroundf(arg(0) * rs); vpY = (int)lroundf(arg(1) * rs); vpW = (int)lroundf((int)arg(2) * rs); vpH = (int)lroundf((int)arg(3) * rs); });
@@ -420,10 +451,10 @@ static void registerGL() {
                            uploadRegion(t, 0, 0, t.w, t.h, arg(6), arg(7), arg(8)); });
     I("glTexSubImage2D", [] { if (arg(1) != 0) return; uploadRegion(texs[boundTex], (int)arg(2), (int)arg(3), (int)arg(4), (int)arg(5), arg(6), arg(7), arg(8)); });
     I("glCompressedTexImage2D", [] { warn("glCompressedTexImage2D format 0x" + std::to_string(arg(2))); Tex& t = texs[boundTex]; t.w = (int)arg(3); t.h = (int)arg(4); t.px.assign((size_t)t.w * t.h, 0xffff00ffu); t.dirty = true; t.gpuOnly = false; });
-    I("glCopyTexImage2D", [] { if (arg(1) != 0) return; if (hw::on) { hw::copyTex(false, 0, 0, (int)arg(3), (int)arg(4), (int)arg(5), (int)arg(6)); return; } ensureFb(); Tex& t = texs[boundTex]; int x = (int)arg(3), y = (int)arg(4), w = (int)arg(5), h = (int)arg(6);
+    I("glCopyTexImage2D", [] { if (arg(1) != 0) return; flushQuad(); if (hw::on) { hw::copyTex(false, 0, 0, (int)arg(3), (int)arg(4), (int)arg(5), (int)arg(6)); return; } ensureFb(); Tex& t = texs[boundTex]; int x = (int)arg(3), y = (int)arg(4), w = (int)arg(5), h = (int)arg(6);
                                t.w = w; t.h = h; t.px.assign((size_t)w * h, 0);
                                for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) { int fy = fbH - 1 - (y + j), fxp = x + i; if (fy >= 0 && fy < fbH && fxp >= 0 && fxp < fbW) t.px[(size_t)j * w + i] = fb[(size_t)fy * fbW + fxp]; } });
-    I("glCopyTexSubImage2D", [] { if (arg(1) != 0) return; if (hw::on) { hw::copyTex(true, (int)arg(2), (int)arg(3), (int)arg(4), (int)arg(5), (int)arg(6), (int)arg(7)); return; } ensureFb(); Tex& t = texs[boundTex]; int xo = (int)arg(2), yo = (int)arg(3), x = (int)arg(4), y = (int)arg(5), w = (int)arg(6), h = (int)arg(7);
+    I("glCopyTexSubImage2D", [] { if (arg(1) != 0) return; flushQuad(); if (hw::on) { hw::copyTex(true, (int)arg(2), (int)arg(3), (int)arg(4), (int)arg(5), (int)arg(6), (int)arg(7)); return; } ensureFb(); Tex& t = texs[boundTex]; int xo = (int)arg(2), yo = (int)arg(3), x = (int)arg(4), y = (int)arg(5), w = (int)arg(6), h = (int)arg(7);
                                   for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) { int fy = fbH - 1 - (y + j), fxp = x + i, tx = xo + i, ty = yo + j;
                                       if (fy >= 0 && fy < fbH && fxp >= 0 && fxp < fbW && tx >= 0 && tx < t.w && ty >= 0 && ty < t.h) t.px[(size_t)ty * t.w + tx] = fb[(size_t)fy * fbW + fxp]; } });
     auto texParam = [](uint32_t pname, uint32_t v) { Tex& t = texs[boundTex]; if (pname == 0x2801) t.minF = v; else if (pname == 0x2800) t.magF = v; else if (pname == 0x2802) t.wrapS = v; else if (pname == 0x2803) t.wrapT = v; };

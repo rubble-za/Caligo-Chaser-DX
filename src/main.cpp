@@ -15,7 +15,7 @@ extern "C" void* tdefl_write_image_to_png_file_in_memory(const void* pImage, int
 
 static const std::vector<uint32_t>& presentFb();
 static bool savePng(const std::string& path) {
-    gl::ensureFb(); size_t len = 0;
+    gl::ensureFb(); gl::flushQuad(); size_t len = 0;
     if (gl::hw::on) gl::hw::readback();
     void* png = tdefl_write_image_to_png_file_in_memory(presentFb().data(), gl::fbW, gl::fbH, 4, &len);
     if (!png) return false;
@@ -101,7 +101,7 @@ static bool composeSoft(std::vector<uint32_t>& dst) {
     }
     return true;
 }static const std::vector<uint32_t>& presentFb() {
-    gl::ensureFb();
+    gl::ensureFb(); gl::flushQuad();
     int idx = titleHighlightIndex(); bool hl = idx >= 0, comp = hud::enabled && hud::active;
     bool hint = g_hintBm && g_hintBm->x0 >= 0 && g_hintBm->x0 + g_hintBm->w <= gl::fbW && g_hintBm->y0 >= 0 && g_hintBm->y0 + g_hintBm->h <= gl::fbH;
     if (!hl && !hint && !comp) return gl::fb;
@@ -383,14 +383,14 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--classic-hud") hud::enabled = false; else if (a == "--hotbar") hud::showBar = true; else if (a == "--no-hotbar") hud::showBar = false; else if (a == "--square-pixels") hud::SY = hud::K; else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
+        else if (a == "--classic-hud") hud::enabled = false; else if (a == "--hotbar") hud::showBar = true; else if (a == "--no-hotbar") hud::showBar = false; else if (a == "--square-pixels") hud::SY = hud::K; else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--fast-present") gl::g_fastQuad = true; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
         else if (a == "--hints") { std::string v = next(); g_hintsMode = v == "off" ? -2 : v == "kb" ? ov::KEYBOARD : v == "pad" ? ov::CONTROLLER : v == "mouse" ? ov::MOUSE : -1; }      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
 #ifdef __ANDROID__
     {   // Android: everything lives in the app's own folder (Android/data/<package>/files), which the user can fill with a file manager or adb: the APK plus the Com2uS folder; saves go next to them
-        g_hideTouchUi = false; hud::enabled = false; g_hintsMode = -2; fullscreen = true; gl::rs = 1.f;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
+        g_hideTouchUi = false; hud::enabled = false; g_hintsMode = -2; fullscreen = true; gl::g_fastQuad = true; gl::rs = 1.f;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
         const char* ext = SDL_AndroidGetExternalStoragePath(); const char* inr = SDL_AndroidGetInternalStoragePath(); std::string base = ext ? ext : "/sdcard";
         { std::error_code e0; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e0)) base = inr; }          // files copied in with adb (or a file manager that cannot write into Android/data) live in the private folder instead
         if (g_dataRoot == ".") g_dataRoot = base; if (g_saveRoot == "save") g_saveRoot = base + "/save";
@@ -414,13 +414,14 @@ int main(int argc, char** argv) {
     if (hl || runSeconds > 0) { if (!wantHw) SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy"); SDL_SetHint(SDL_HINT_AUDIODRIVER, "dummy"); }   // self-test modes never open a real window (except --gpu)
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");                        // landscape only (the manifest says the same)
 #endif
     if (SDL_Init(initFlags) != 0) { fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError()); return 1; }
 
     bootHost(lib);
     gl::fbW = gl::vpW = gl::scW = (int)lroundf(g_dispW * gl::rs); gl::fbH = gl::vpH = gl::scH = (int)lroundf(g_dispH * gl::rs); gl::ensureFb();
 
-    SDL_Window* win = nullptr; SDL_Renderer* ren = nullptr; SDL_Texture* tex = nullptr; SDL_AudioDeviceID adev = 0;
+    SDL_Window* win = nullptr; SDL_Renderer* ren = nullptr; SDL_Texture* tex = nullptr; SDL_Texture* texq = nullptr; SDL_AudioDeviceID adev = 0;
     const Uint32 winFlags = SDL_WINDOW_RESIZABLE | (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
     if (wantHw) {                                                  // GPU renderer: OpenGL window + offscreen framebuffer; falls back to software if anything is missing
         win = SDL_CreateWindow("Caligo Chaser", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags | SDL_WINDOW_OPENGL | (hl ? SDL_WINDOW_HIDDEN : 0));
@@ -448,6 +449,7 @@ int main(int argc, char** argv) {
             SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);
             SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gl::forceNearest ? "nearest" : "linear");   // read when the texture is created
             tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, gl::fbW, gl::fbH);
+            if (gl::g_fastQuad) texq = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, 512, 256);     // the game's own framebuffer texture, scaled by the GPU (see gl_soft.inc, PendingQuad)
         }
         SDL_AudioSpec want{}, have{}; want.freq = 44100; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = 1024; want.callback = audioCallback;
         adev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
@@ -532,6 +534,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "raster: fast=%llu slow(persp=%llu gouraud=%llu env=%llu blend=%llu) fastPx=%llu slowPx=%llu\n", (unsigned long long)gl::fastTris, (unsigned long long)gl::slowPersp, (unsigned long long)gl::slowGouraud, (unsigned long long)gl::slowEnv, (unsigned long long)gl::slowBlend, (unsigned long long)gl::fastPixels, (unsigned long long)gl::slowPixels);
         fprintf(stderr, "time in GL draw: %.2fs\n", gl::drawSeconds);
         if (getenv("CC_PROFILE")) profileReport();
+        if (getenv("CC_QUADSTAT")) fprintf(stderr, "quad fast path: %llu hits, %llu misses\n", (unsigned long long)gl::g_quadHit, (unsigned long long)gl::g_quadMiss);
         fprintf(stderr, "headless run done: %d frames, %llu draw calls, %llu triangles\n", headless, (unsigned long long)gl::drawCalls, (unsigned long long)gl::trisDrawn);
         return 0;
     }
@@ -604,9 +607,6 @@ int main(int argc, char** argv) {
                 static SDL_FingerID cur = -1; if (e.type == SDL_FINGERDOWN && cur == -1) cur = e.tfinger.fingerId; if (e.tfinger.fingerId != cur) break; if (e.type == SDL_FINGERUP) cur = -1;
                 int ww = 1, wh = 1; SDL_GetWindowSize(win, &ww, &wh); SDL_Event m{}; m.type = e.type == SDL_FINGERDOWN ? SDL_MOUSEBUTTONDOWN : e.type == SDL_FINGERUP ? SDL_MOUSEBUTTONUP : SDL_MOUSEMOTION;
                 int px = (int)(e.tfinger.x * ww), py = (int)(e.tfinger.y * wh);
-#ifdef __ANDROID__
-                if (e.type == SDL_FINGERDOWN) SDL_Log("finger raw x=%.4f y=%.4f window %dx%d", e.tfinger.x, e.tfinger.y, ww, wh);          // dev: touch calibration
-#endif
                 { SDL_Rect db{}; if (SDL_GetDisplayBounds(0, &db) == 0 && db.w > ww) { float q = ww / (float)db.w; px = (int)(ww * .5f + (px - ww * .5f) * powf(q, 3.2f)); } }          // this phone reports finger positions across the full display width (cutout included) while the window is narrower: pull them back toward the centre by that ratio
 
                 if (m.type == SDL_MOUSEMOTION) { m.motion.x = px; m.motion.y = py; m.motion.xrel = 99; } else { m.button.button = SDL_BUTTON_LEFT; m.button.x = px; m.button.y = py; }
@@ -635,13 +635,15 @@ int main(int argc, char** argv) {
             g_hintBm = currentHints();
             if (gl::hw::on) gl::hw::present(titleHighlightIndex(), g_hintBm);
             else {
+                auto qt = texq && gl::g_quad.on ? gl::texs.find(gl::g_quad.tex) : gl::texs.end();
+                if (qt != gl::texs.end() && !qt->second.px.empty()) {                  // the frame is just the game's picture: scale its texture on the GPU, no CPU drawing
+                    const gl::PendingQuad& q = gl::g_quad; SDL_UpdateTexture(texq, nullptr, qt->second.px.data(), 512 * 4);
+                    SDL_Rect src{(int)lroundf(std::min(q.u0, q.u1) * 512), (int)lroundf(std::min(q.v0, q.v1) * 256), 0, 0}; src.w = (int)lroundf(std::max(q.u0, q.u1) * 512) - src.x; src.h = (int)lroundf(std::max(q.v0, q.v1) * 256) - src.y;
+                    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255); SDL_RenderClear(ren); SDL_RenderCopyEx(ren, texq, &src, nullptr, 0, nullptr, (SDL_RendererFlip)((q.u0 > q.u1 ? SDL_FLIP_HORIZONTAL : 0) | (q.v0 > q.v1 ? SDL_FLIP_VERTICAL : 0)));
+                } else {
                 SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
                 SDL_SetRenderDrawColor(ren, 0, 0, 0, 255); SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr);
-#ifdef __ANDROID__
-                static Uint32 lastTouchMs = 0; if (g_touch.down) lastTouchMs = SDL_GetTicks();
-                if (lastTouchMs && SDL_GetTicks() - lastTouchMs < 2000) { int cx = (int)(g_touch.x * gl::rs), cy = (int)(g_touch.y * gl::rs); SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);    // dev: where the game thinks the finger is, kept for 2 s after lifting it
-                    for (int k = -1; k <= 1; k++) { SDL_RenderDrawLine(ren, cx - 120, cy + k, cx + 120, cy + k); SDL_RenderDrawLine(ren, cx + k, cy - 120, cx + k, cy + 120); } }
-#endif
+                }
                 SDL_RenderPresent(ren);
             }
 #ifdef __ANDROID__

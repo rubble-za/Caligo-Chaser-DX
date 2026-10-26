@@ -99,7 +99,11 @@ static void fetch(const VA& a, int first, int count, bool isColor, bool isNormal
     else if (!isNormal) for (int i = 0; i < count; i++) { if (a.size < 4) out[(size_t)i * 4 + 3] = 1.f; }
 }
 
+#ifdef __ANDROID__
+#include "gl_hw_stub.inc"
+#else
 #include "gl_hw.inc"
+#endif
 
 // ---- rasterizer ----
 struct V { float x, y, z, w; float r, g, b, a, u, v; };

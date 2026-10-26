@@ -2,9 +2,13 @@
 // Runs the game's original ARM code (read from the user's own APK) inside an emulator, with the Java/Android
 // side re-implemented natively: SDL2 window + input, software GLES1 renderer, audio mixer.
 #include <set>
+#ifndef __ANDROID__
 #define SDL_MAIN_HANDLED
+#endif
 #include <SDL.h>
+#ifndef __ANDROID__
 #include <SDL_opengl.h>
+#endif
 #include "host.cpp"
 
 extern "C" void* tdefl_write_image_to_png_file_in_memory(const void* pImage, int w, int h, int num_chans, size_t* pLen_out);
@@ -380,6 +384,14 @@ int main(int argc, char** argv) {
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
+#ifdef __ANDROID__
+    {   // Android: everything lives in the app's own folder (Android/data/<package>/files), which the user can fill with a file manager or adb: the APK plus the Com2uS folder; saves go next to them
+        const char* ext = SDL_AndroidGetExternalStoragePath(); std::string base = ext ? ext : "/sdcard";
+        if (g_dataRoot == ".") g_dataRoot = base; if (g_saveRoot == "save") g_saveRoot = base + "/save";
+        if (apk.empty()) { std::error_code ec; for (auto& e : std::filesystem::directory_iterator(base, ec)) if (e.path().extension() == ".apk") { apk = e.path().string(); break; } }
+        if (apk.empty() || !std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr")) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Caligo Chaser", ("Copy your APK and the Com2uS folder into:\n" + base).c_str(), nullptr); return 1; }
+    }
+#endif
     if (apk.empty()) { std::error_code ec; for (auto& e : std::filesystem::directory_iterator(".", ec)) if (e.path().extension() == ".apk") { apk = e.path().string(); break; } }
     if (apk.empty()) { fprintf(stderr, "No APK found. Pass --apk <CaligoChaser.apk> or put it next to this program.\n"); usage(); return 1; }
     std::string err; if (!apkOpen(apk, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }

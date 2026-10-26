@@ -24,3 +24,10 @@ snap_*.bin
 
 # local working notes for Claude Code
 CLAUDE.md
+
+# Android build outputs
+android/.gradle/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+android/build/

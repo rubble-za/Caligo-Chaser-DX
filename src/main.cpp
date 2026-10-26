@@ -2,15 +2,17 @@
 // Runs the game's original ARM code (read from the user's own APK) inside an emulator, with the Java/Android
 // side re-implemented natively: SDL2 window + input, software GLES1 renderer, audio mixer.
 #include <set>
-#include "host.cpp"
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#include <SDL_opengl.h>
+#include "host.cpp"
 
 extern "C" void* tdefl_write_image_to_png_file_in_memory(const void* pImage, int w, int h, int num_chans, size_t* pLen_out);
 
 static const std::vector<uint32_t>& presentFb();
 static bool savePng(const std::string& path) {
     gl::ensureFb(); size_t len = 0;
+    if (gl::hw::on) gl::hw::readback();
     void* png = tdefl_write_image_to_png_file_in_memory(presentFb().data(), gl::fbW, gl::fbH, 4, &len);
     if (!png) return false;
     FILE* f = fopen(path.c_str(), "wb"); if (!f) { mz_free(png); return false; }
@@ -219,12 +221,13 @@ static void usage() {
         "  --touch-ui       keep the on-screen d-pad and action buttons (hidden by default)\n"
         "  --filter nearest|smooth   texture filtering (default nearest = crisp pixels, best at --res 1600x960 / 2400x1440; smooth = bilinear)\n"
         "  --res WxH        render resolution, e.g. 1920x1080 (default 1600x960; use 800x480 for the original size on slower PCs; layout is kept, picture is rendered larger)\n"
+        "  --soft           use the software renderer instead of the GPU (OpenGL) renderer\n"
         "  --fullscreen     start fullscreen (F11 toggles, F12 saves a screenshot)\n"
         "Testing: --headless <frames> [--script \"400:tap:400:240;...\"] [--dump-every N --dump-dir D] [--trace]\n");
 }
 
 int main(int argc, char** argv) {
-    std::string apk, script, inject, dumpDir = "frames"; double runSeconds = 0; int headless = -1, dumpEvery = 0, scale = 1; bool fullscreen = false;
+    std::string apk, script, inject, dumpDir = "frames"; double runSeconds = 0; int headless = -1, dumpEvery = 0, scale = 1; bool fullscreen = false, softFlag = false, gpuFlag = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i]; auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
         if (a == "--apk") apk = next(); else if (a == "--data") g_dataRoot = next(); else if (a == "--save") g_saveRoot = next();
@@ -235,6 +238,7 @@ int main(int argc, char** argv) {
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
         else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
+        else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
@@ -250,22 +254,29 @@ int main(int argc, char** argv) {
     bool hl = headless >= 0;
     g_debugState = g_debugState0 = getenv("CC_DEBUG_STATE") != nullptr;
     Uint32 initFlags = SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER;
-    if (hl || runSeconds > 0) { SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy"); SDL_SetHint(SDL_HINT_AUDIODRIVER, "dummy"); }   // self-test modes never open a real window
+    bool wantHw = !softFlag && ((!hl && runSeconds <= 0) || gpuFlag);
+    if (hl || runSeconds > 0) { if (!wantHw) SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy"); SDL_SetHint(SDL_HINT_AUDIODRIVER, "dummy"); }   // self-test modes never open a real window (except --gpu)
     if (SDL_Init(initFlags) != 0) { fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError()); return 1; }
 
     bootHost(lib);
     gl::fbW = gl::vpW = gl::scW = (int)lroundf(g_dispW * gl::rs); gl::fbH = gl::vpH = gl::scH = (int)lroundf(g_dispH * gl::rs); gl::ensureFb();
 
     SDL_Window* win = nullptr; SDL_Renderer* ren = nullptr; SDL_Texture* tex = nullptr; SDL_AudioDeviceID adev = 0;
+    const Uint32 winFlags = SDL_WINDOW_RESIZABLE | (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    if (wantHw) {                                                  // GPU renderer: OpenGL window + offscreen framebuffer; falls back to software if anything is missing
+        win = SDL_CreateWindow("Caligo Chaser", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags | SDL_WINDOW_OPENGL | (hl ? SDL_WINDOW_HIDDEN : 0));
+        if (!win || !gl::hw::init(win)) { if (win) SDL_DestroyWindow(win); win = nullptr; fprintf(stderr, "GPU renderer unavailable, using the software renderer\n"); }
+    }
     if (!hl) {
-        win = SDL_CreateWindow("Caligo Chaser", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale,
-                               SDL_WINDOW_RESIZABLE | (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
-        if (!win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return 1; }
-        ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-        if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
-        SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);
-        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gl::forceNearest ? "nearest" : "linear");   // read when the texture is created
-        tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, gl::fbW, gl::fbH);
+        if (!win) {
+            win = SDL_CreateWindow("Caligo Chaser", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags);
+            if (!win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return 1; }
+            ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+            if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+            SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);
+            SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, gl::forceNearest ? "nearest" : "linear");   // read when the texture is created
+            tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, gl::fbW, gl::fbH);
+        }
         SDL_AudioSpec want{}, have{}; want.freq = 44100; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = 1024; want.callback = audioCallback;
         adev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
         if (adev) { audio::devRate = have.freq; SDL_PauseAudioDevice(adev, 0); } else fprintf(stderr, "audio unavailable: %s\n", SDL_GetError());
@@ -356,7 +367,7 @@ int main(int argc, char** argv) {
             case SDL_QUIT: running = false; break;
             case SDL_WINDOWEVENT:
                 if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESIZED || e.window.event == SDL_WINDOWEVENT_LEAVE || e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) releaseAllInput(now);
-                if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESTORED || e.window.event == SDL_WINDOWEVENT_EXPOSED) SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH);   // re-assert letterboxing after any size change
+                if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_RESTORED || e.window.event == SDL_WINDOWEVENT_EXPOSED) { if (ren) SDL_RenderSetLogicalSize(ren, gl::fbW, gl::fbH); }   // re-assert letterboxing after any size change
                 if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST && !paused) { paused = true; pauseBGM = snd::g_curBGM; snd::pause(pauseBGM); snd::stopCurrent(false); gamePause(); }
                 else if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && paused) { paused = false; snd::resume(pauseBGM); gameResume(); }
                 break;
@@ -389,7 +400,7 @@ int main(int argc, char** argv) {
             case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP: case SDL_MOUSEMOTION: {
                 if (e.type != SDL_MOUSEMOTION && e.button.button != SDL_BUTTON_LEFT) break;
                 int wx = e.type == SDL_MOUSEMOTION ? e.motion.x : e.button.x, wy = e.type == SDL_MOUSEMOTION ? e.motion.y : e.button.y;
-                float lx, ly; SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly); lx /= gl::rs; ly /= gl::rs;
+                float lx, ly; if (gl::hw::on) gl::hw::windowToLogical(wx, wy, lx, ly); else SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly); lx /= gl::rs; ly /= gl::rs;
                 if (e.type == SDL_MOUSEBUTTONDOWN) { g_touch.down = true; SDL_CaptureMouse(SDL_TRUE); touchEvent(0, lx, ly, now); }
                 else if (e.type == SDL_MOUSEBUTTONUP) { SDL_CaptureMouse(SDL_FALSE); if (g_touch.down) { g_touch.down = false; touchEvent(1, lx, ly, now); } }
                 else if (g_touch.down) touchEvent(2, lx, ly, now);
@@ -398,9 +409,12 @@ int main(int argc, char** argv) {
         }
         if (!paused) {
             inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();
-            SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
-            SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr); SDL_RenderPresent(ren);
-            if (!(SDL_GetWindowFlags(win) & SDL_WINDOW_SHOWN) || true) SDL_Delay(1);
+            if (gl::hw::on) { int hi = peekInt("nState") == 4 ? peekInt("g_nMenuIndex") : -1; gl::hw::present(hi >= 0 && hi <= 2 ? hi : -1); }
+            else {
+                SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
+                SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr); SDL_RenderPresent(ren);
+            }
+            SDL_Delay(1);
         } else SDL_Delay(50);
     }
     if (runSeconds > 0) fprintf(stderr, "self-test: %llu frames in %.1fs (%.1f fps)\n", (unsigned long long)frameCount, runSeconds, frameCount / runSeconds);

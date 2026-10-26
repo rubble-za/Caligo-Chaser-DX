@@ -36,8 +36,10 @@ CONTROLS
   --res 1600x960 or 2400x1440; at other window sizes some pixel rows/columns can look slightly uneven.
   --filter smooth brings back the original bilinear (soft) look.
   Resolution: the game renders at 1600x960 by default (the layout is unchanged, the picture is sharper and the window is
-  letter-boxed to the game's 5:3 shape). The renderer is software-based, so it needs a reasonably fast CPU. If the game runs
-  slowly, use --res 800x480 (the original size). Larger sizes work too, e.g. --res 1920x1080 or --res 2400x1440.
+  letter-boxed to the game's 5:3 shape). Larger sizes work too, e.g. --res 1920x1080 or --res 2400x1440.
+  Renderer: the game is drawn on your graphics card through OpenGL. If OpenGL is not available the program says so and falls
+  back to the built-in software renderer automatically (that one needs a fast CPU; --res 800x480 helps). --soft forces the
+  software renderer.
 
 SAVES
   Written to the "save" folder next to the program (your original data folder is never modified).

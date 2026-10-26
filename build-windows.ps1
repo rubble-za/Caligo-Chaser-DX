@@ -64,5 +64,5 @@ $U = "$T\unicorn"; $S = "$T\SDL2-2.30.9"
 $libUnicorn = @("$U\build-win\libunicorn.a", "$U\build-win\libunicorn_static.a") | Where-Object { Test-Path $_ } | Select-Object -First 1
 Run "$M-clang++" -std=c++17 -O3 -Isrc "-I$U\include" "-I$T\miniz" "-I$S\include" "-I$S\include\SDL2" src\main.cpp build-win\stb_vorbis.o build-win\miniz.o -o build-win\CaligoChaser.exe `
     "$S\build-win\libSDL2.a" $libUnicorn "$U\build-win\libarm-softmmu.a" "$U\build-win\libunicorn-common.a" `
-    -static -lmingw32 -lpthread -lm -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -lshell32 -lcfgmgr32 -lws2_32
+    -static -lmingw32 -lpthread -lm -lopengl32 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -lshell32 -lcfgmgr32 -lws2_32
 Write-Host 'Built build-win\CaligoChaser.exe'

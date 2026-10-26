@@ -8,4 +8,4 @@ export PATH=$PWD/third_party/llvm-mingw/bin:$PATH; T=third_party; U=$T/unicorn; 
 $M-clang -O2 -c $T/stb/stb_vorbis.c -o build-win/stb_vorbis.o; $M-clang -O2 -c $T/miniz/miniz.c -o build-win/miniz.o
 $M-clang++ -std=c++17 -O3 -Isrc -I$U/include -I$T/miniz -I$T/SDL2-2.30.9/include -I$T/SDL2-2.30.9/include/SDL2 src/main.cpp build-win/stb_vorbis.o build-win/miniz.o -o build-win/CaligoChaser.exe \
   $T/SDL2-2.30.9/build-win/libSDL2.a $U/build-win/libunicorn.a $U/build-win/libarm-softmmu.a $U/build-win/libunicorn-common.a \
-  -static -lmingw32 -lpthread -lm -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -lshell32 -lcfgmgr32 -lws2_32
+  -static -lmingw32 -lpthread -lm -lopengl32 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -lshell32 -lcfgmgr32 -lws2_32

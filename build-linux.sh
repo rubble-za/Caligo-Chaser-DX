@@ -13,5 +13,5 @@ T=third_party; U=$T/unicorn
 gcc -O2 -c $T/stb/stb_vorbis.c -o build/stb_vorbis.o
 gcc -O2 -c $T/miniz/miniz.c -o build/miniz.o
 g++ -std=c++17 -O3 -Isrc -I$U/include -I$T/miniz -I$T/SDL2-2.30.9/include -I$T/SDL2-2.30.9/include/SDL2 src/main.cpp build/stb_vorbis.o build/miniz.o -o build/CaligoChaser \
-  $T/SDL2-2.30.9/build-linux/libSDL2.a $U/build/libunicorn.a $U/build/libarm-softmmu.a $U/build/libunicorn-common.a -lpthread -lm -ldl
+  $T/SDL2-2.30.9/build-linux/libSDL2.a $U/build/libunicorn.a $U/build/libarm-softmmu.a $U/build/libunicorn-common.a -lpthread -lm -ldl -lGL
 echo "built build/CaligoChaser"

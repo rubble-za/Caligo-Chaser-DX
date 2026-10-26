@@ -2,7 +2,7 @@
 
 A desktop port of the Android game **Caligo Chaser** (Com2uS, APK v1.0.4) for Windows and Linux, with controller, keyboard and mouse support.
 
-It is not a rewrite. The original game code is read from **your own copy of the APK** and run in an emulator, while the Android side (window, input, sound, timers, save files) is re-implemented natively. A software OpenGL ES 1 renderer draws the game, and SDL2 provides the window and input.
+It is not a rewrite. The original game code is read from **your own copy of the APK** and run in an emulator, while the Android side (window, input, sound, timers, save files) is re-implemented natively. The game's OpenGL ES 1 calls are replayed through desktop OpenGL on your graphics card (with a built-in software renderer as automatic fallback, or `--soft`), and SDL2 provides the window and input.
 
 ## You must bring your own game files
 

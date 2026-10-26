@@ -17,7 +17,8 @@ enum : uint32_t {
     MODULATE = 0x2100, DECAL = 0x2101, REPLACE = 0x1E01, ADD = 0x0104,
     MODELVIEW = 0x1700, PROJECTION = 0x1701, TEXTURE = 0x1702
 };
-struct Tex { int w = 0, h = 0; std::vector<uint32_t> px; uint32_t minF = 0x2702, magF = LINEAR, wrapS = REPEAT, wrapT = REPEAT; };
+struct Tex { int w = 0, h = 0; std::vector<uint32_t> px; uint32_t minF = 0x2702, magF = LINEAR, wrapS = REPEAT, wrapT = REPEAT;
+             unsigned glId = 0; bool dirty = true, gpuOnly = false; };      // GPU path: GL texture object, CPU pixels newer than it, pixels live only on the GPU
 struct VA { bool en = false; int size = 4; uint32_t type = FLOAT, stride = 0, ptr = 0; };
 struct Mat { float m[16]; };                                   // column-major
 static Mat identity() { Mat r{}; r.m[0] = r.m[5] = r.m[10] = r.m[15] = 1; return r; }
@@ -65,6 +66,7 @@ static uint32_t convertPixel(const uint8_t* p, uint32_t fmt, uint32_t type) {
 }
 static void uploadRegion(Tex& t, int xo, int yo, int w, int h, uint32_t fmt, uint32_t type, uint32_t src) {
     if (!src) return;
+    t.dirty = true; t.gpuOnly = false;
     int bpp = bytesPerPixel(fmt, type), rowBytes = (w * bpp + 3) & ~3;       // GL_UNPACK_ALIGNMENT = 4
     std::vector<uint8_t> buf((size_t)rowBytes * h); rdbuf(src, buf.data(), buf.size());
     for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
@@ -95,6 +97,8 @@ static void fetch(const VA& a, int first, int count, bool isColor, bool isNormal
     if (isColor) for (int i = 0; i < count; i++) for (int c = a.size; c < 4; c++) out[(size_t)i * 4 + c] = 1.f;
     else if (!isNormal) for (int i = 0; i < count; i++) { if (a.size < 4) out[(size_t)i * 4 + 3] = 1.f; }
 }
+
+#include "gl_hw.inc"
 
 // ---- rasterizer ----
 struct V { float x, y, z, w; float r, g, b, a, u, v; };
@@ -326,6 +330,7 @@ static void draw(uint32_t mode, int first, int count, const std::vector<uint32_t
 static void drawImpl(uint32_t mode, int first, int count, const std::vector<uint32_t>* indices) {
     ensureFb(); drawCalls++;
     if (!vtx.en || count <= 0) return;
+    if (hw::on) { hw::draw(mode, first, count, indices); return; }
     int lo = first, hi = first + count - 1;
     if (indices) { lo = INT32_MAX; hi = -1; for (uint32_t i : *indices) { lo = std::min(lo, (int)i); hi = std::max(hi, (int)i); } if (hi < 0) return; }
     int n = hi - lo + 1; std::vector<float> P, C, T, N;
@@ -379,7 +384,7 @@ static void registerGL() {
     auto I = [](const char* n, std::function<void()> f) { g_impl[n] = f; };
     I("glClearColor",  [] { for (int i = 0; i < 4; i++) clearColor[i] = argf(i); });
     I("glClearColorx", [] { for (int i = 0; i < 4; i++) clearColor[i] = fx(arg(i)); });
-    I("glClear", [] { ensureFb(); if (arg(0) & 0x4000) { uint32_t c = pack(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+    I("glClear", [] { ensureFb(); if (hw::on) { if (arg(0) & 0x4000) hw::clear(); return; } if (arg(0) & 0x4000) { uint32_t c = pack(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
                          if (enScissor) { for (int y = std::max(0, fbH - (scY + scH)); y < std::min(fbH, fbH - scY); y++) for (int x = std::max(0, scX); x < std::min(fbW, scX + scW); x++) fb[(size_t)y * fbW + x] = c; }
                          else std::fill(fb.begin(), fb.end(), c); } });
     I("glViewport", [] { vpX = (int)lroundf(arg(0) * rs); vpY = (int)lroundf(arg(1) * rs); vpW = (int)lroundf((int)arg(2) * rs); vpH = (int)lroundf((int)arg(3) * rs); });
@@ -404,16 +409,16 @@ static void registerGL() {
                              else { std::vector<uint16_t> b(n); rdbuf(p, b.data(), n * 2); for (uint32_t i = 0; i < n; i++) ix[i] = b[i]; }
                              draw(arg(0), 0, (int)n, &ix); });
     I("glGenTextures", [] { for (uint32_t i = 0; i < arg(0); i++) { wr32(arg(1) + 4 * i, nextTex); texs[nextTex++] = Tex(); } });
-    I("glDeleteTextures", [] { for (uint32_t i = 0; i < arg(0); i++) texs.erase(rd32(arg(1) + 4 * i)); });
+    I("glDeleteTextures", [] { for (uint32_t i = 0; i < arg(0); i++) { auto it = texs.find(rd32(arg(1) + 4 * i)); if (it != texs.end()) { hw::freeTex(it->second); texs.erase(it); } } });
     I("glBindTexture", [] { if (activeUnit == 0) { boundTex = arg(1); if (arg(1) && !texs.count(arg(1))) texs[arg(1)] = Tex(); } });
-    I("glTexImage2D", [] { if (arg(1) != 0) return; Tex& t = texs[boundTex]; t.w = (int)arg(3); t.h = (int)arg(4); t.px.assign((size_t)t.w * t.h, 0);
+    I("glTexImage2D", [] { if (arg(1) != 0) return; Tex& t = texs[boundTex]; t.w = (int)arg(3); t.h = (int)arg(4); t.px.assign((size_t)t.w * t.h, 0); t.dirty = true; t.gpuOnly = false;
                            uploadRegion(t, 0, 0, t.w, t.h, arg(6), arg(7), arg(8)); });
     I("glTexSubImage2D", [] { if (arg(1) != 0) return; uploadRegion(texs[boundTex], (int)arg(2), (int)arg(3), (int)arg(4), (int)arg(5), arg(6), arg(7), arg(8)); });
-    I("glCompressedTexImage2D", [] { warn("glCompressedTexImage2D format 0x" + std::to_string(arg(2))); Tex& t = texs[boundTex]; t.w = (int)arg(3); t.h = (int)arg(4); t.px.assign((size_t)t.w * t.h, 0xffff00ffu); });
-    I("glCopyTexImage2D", [] { if (arg(1) != 0) return; ensureFb(); Tex& t = texs[boundTex]; int x = (int)arg(3), y = (int)arg(4), w = (int)arg(5), h = (int)arg(6);
+    I("glCompressedTexImage2D", [] { warn("glCompressedTexImage2D format 0x" + std::to_string(arg(2))); Tex& t = texs[boundTex]; t.w = (int)arg(3); t.h = (int)arg(4); t.px.assign((size_t)t.w * t.h, 0xffff00ffu); t.dirty = true; t.gpuOnly = false; });
+    I("glCopyTexImage2D", [] { if (arg(1) != 0) return; if (hw::on) { hw::copyTex(false, 0, 0, (int)arg(3), (int)arg(4), (int)arg(5), (int)arg(6)); return; } ensureFb(); Tex& t = texs[boundTex]; int x = (int)arg(3), y = (int)arg(4), w = (int)arg(5), h = (int)arg(6);
                                t.w = w; t.h = h; t.px.assign((size_t)w * h, 0);
                                for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) { int fy = fbH - 1 - (y + j), fxp = x + i; if (fy >= 0 && fy < fbH && fxp >= 0 && fxp < fbW) t.px[(size_t)j * w + i] = fb[(size_t)fy * fbW + fxp]; } });
-    I("glCopyTexSubImage2D", [] { if (arg(1) != 0) return; ensureFb(); Tex& t = texs[boundTex]; int xo = (int)arg(2), yo = (int)arg(3), x = (int)arg(4), y = (int)arg(5), w = (int)arg(6), h = (int)arg(7);
+    I("glCopyTexSubImage2D", [] { if (arg(1) != 0) return; if (hw::on) { hw::copyTex(true, (int)arg(2), (int)arg(3), (int)arg(4), (int)arg(5), (int)arg(6), (int)arg(7)); return; } ensureFb(); Tex& t = texs[boundTex]; int xo = (int)arg(2), yo = (int)arg(3), x = (int)arg(4), y = (int)arg(5), w = (int)arg(6), h = (int)arg(7);
                                   for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) { int fy = fbH - 1 - (y + j), fxp = x + i, tx = xo + i, ty = yo + j;
                                       if (fy >= 0 && fy < fbH && fxp >= 0 && fxp < fbW && tx >= 0 && tx < t.w && ty >= 0 && ty < t.h) t.px[(size_t)ty * t.w + tx] = fb[(size_t)fy * fbW + fxp]; } });
     auto texParam = [](uint32_t pname, uint32_t v) { Tex& t = texs[boundTex]; if (pname == 0x2801) t.minF = v; else if (pname == 0x2800) t.magF = v; else if (pname == 0x2802) t.wrapS = v; else if (pname == 0x2803) t.wrapT = v; };

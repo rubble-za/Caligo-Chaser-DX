@@ -101,6 +101,12 @@ static void gameInit(int64_t startMs) {
 }
 // One iteration of WrapperManager.run() (called once per displayed frame, like GLSurfaceView.onDrawFrame).
 static std::function<void()> g_preFrame;                     // host-side patches applied before each frame
+static std::function<void()> g_beforeTick;                   // host hook run right before each game tick (timer callback)
+static void flushEvents() {                                  // deliver queued input to the game
+    while (!g_events.empty()) { EventItem e = g_events.front(); g_events.pop_front();
+        if (e.type == -100) { auto it = g_exports.find("nCheckDashPressStart"); if (it != g_exports.end()) { uint32_t v = 0xFFFFFFFFu; wrbuf(it->second, &v, 4); } continue; }   // host pseudo-event: forget the previous direction tap (kills double-tap dash)
+        callGuest(nativeFn("Event"), {ENV_ADDR, g_cls, (uint32_t)e.type, (uint32_t)e.p1, (uint32_t)e.p2}); }
+}
 static void gameFrame(int64_t nowMs) {
     g_nowMs = nowMs; putSystemTime();
     { uint32_t st = 0, gm = 0, msg = 0; uint8_t dlg = 0; auto a = g_exports.find("nState"), b = g_exports.find("nGameMode"), c = g_exports.find("blnDialogActive"), d = g_exports.find("nGameMsgType");
@@ -110,14 +116,13 @@ static void gameFrame(int64_t nowMs) {
       bool on = st == 12 && gm != 2 && !dlg && !msg;                       // not while an NPC dialogue / game message is up: those draw into the same rows
       if (on && !g_stripOn) g_stripLearnUntil = nowMs + 1500; g_stripOn = on; g_stripNow = nowMs; }   // see bottom-strip repair in imports.inc
     if (g_preFrame) g_preFrame();
-    while (!g_events.empty()) { EventItem e = g_events.front(); g_events.pop_front();
-        if (e.type == -100) { auto it = g_exports.find("nCheckDashPressStart"); if (it != g_exports.end()) { uint32_t v = 0xFFFFFFFFu; wrbuf(it->second, &v, 4); } continue; }   // host pseudo-event: forget the previous direction tap (kills double-tap dash)
-        callGuest(nativeFn("Event"), {ENV_ADDR, g_cls, (uint32_t)e.type, (uint32_t)e.p1, (uint32_t)e.p2}); }
+    flushEvents();
     int i = 0;
     while (i <= g_maxIndex) {                                // identical to WrapperManager.run()'s timer loop
         if (g_timerList[i] == 0 || g_nowMs < g_fireList[i]) { i++; continue; }
         if (g_maxIndex == i) g_maxIndex--;
         int64_t old = g_fireList[i];
+        if (g_beforeTick) { g_beforeTick(); flushEvents(); }   // the game's logic reads its input state once per tick, so anything that depends on ticks (8-way alternation) runs here
         callGuest(nativeFn("Render"), {ENV_ADDR, g_cls, (uint32_t)g_timerList[i]});
         if (old == g_fireList[i]) g_timerList[i] = 0;
     }

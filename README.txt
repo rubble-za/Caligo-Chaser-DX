@@ -19,7 +19,7 @@ CONTROLS
                   Space or Tab/F1 = menu      Enter = confirm      Esc or Backspace = Back/cancel
   F11           fullscreen          F12   screenshot (PNG, next to the program)
   8-way movement: hold two directions (for example Up + Right, or push the stick diagonally) to walk diagonally. The game itself
-  only understands one direction at a time, so the two directions are alternated frame by frame; the hero uses the game's own
+  only understands one direction at a time, so the two directions are alternated on every game tick; the hero uses the game's own
   movement and collision and moves at about 0.7 of the straight-line speed along each diagonal. In menus the original
   behaviour applies (the most recently pressed direction wins). --four-way turns diagonals off everywhere.
   Xbox-layout controller (plug in any time):

@@ -142,8 +142,8 @@ static int g_dirSent = -1; static bool g_aimFollow = false; static bool g_allowD
 static int peekInt(const char* n);
 static void steerHero(bool left) { if (g_debugState0) fprintf(stderr, "[steer] left=%d nState=%d mode=%d\n", left, peekInt("nState"), peekInt("nGameMode")); if (peekInt("nState") != 12 || peekInt("nGameMode") != 0) return; auto it = g_exports.find("g_tHeroProp"); if (it == g_exports.end()) return; uint8_t v = left ? 1 : 0; wrbuf(it->second + 4, &v, 1); } static int g_repress = 0;                         // direction currently pressed in the game
 static bool isDir(int k) { return k == 58 || k == 59 || k == 60 || k == 61; }
-// 8-way movement: the game reads a single direction key per frame, so while a horizontal and a vertical direction are held in the world we alternate between
-// them frame by frame. The hero then moves diagonally using the game's own movement and collision (at about 0.7 of the straight-line speed, like a normalised diagonal).
+// 8-way movement: the game reads a single direction key per tick, so while a horizontal and a vertical direction are held in the world we alternate between
+// them tick by tick (not loop by loop: the game ticks every second or third loop, which would keep landing on the same direction). The hero then moves diagonally using the game's own movement and collision (at about 0.7 of the straight-line speed, like a normalised diagonal).
 static bool g_eightWay = true, g_diagPhase = false;
 static bool inGameplay();
 static int wantDir() {
@@ -166,8 +166,8 @@ static void dirSync() {
 }
 static void inputTick() {
     if (g_repress > 0 && --g_repress == 0) { if (g_keyRef[62] > 0) pushEvent(2, 62, -1); }
-    if (g_eightWay && g_dirStack.size() >= 2) { g_diagPhase = !g_diagPhase; dirSync(); }       // diagonal held: switch axis for this frame (no-op unless both axes are held)
 }
+static void diagonalTick() { if (g_eightWay && g_dirStack.size() >= 2) { g_diagPhase = !g_diagPhase; dirSync(); } }   // run before every game tick: switch axis (no-op unless both axes are held)
 static void inputKey(int gk, bool down) {
     if (gk < 0) return;
     if (g_debugState0) fprintf(stderr, "[input] game key %d %s\n", gk, down ? "down" : "up");
@@ -344,12 +344,28 @@ int main(int argc, char** argv) {
                     break; }
                 }
     };
+    // Left stick (SDL range -32768..32767, y down) -> game direction keys. Pushed within 22.5 degrees of a diagonal it holds two keys (8-way, see diagonalTick).
+    auto applyStick = [&](int ax, int ay) {
+        int want = -1, wantV = -1; int mag = std::max(abs(ax), abs(ay));
+        bool wasActive = stickDir != -1; int thr = wasActive ? 12000 : 18000;           // hysteresis
+        if (mag > thr) {
+            int h = ax > 0 ? 61 : 60, v = ay > 0 ? 59 : 58;
+            bool diag = g_eightWay && inGameplay() && std::min(abs(ax), abs(ay)) * 1000 > std::max(abs(ax), abs(ay)) * 414;
+            if (diag) { want = h; wantV = v; } else want = abs(ax) > abs(ay) ? h : v;
+        }
+        if (stickDir != -1 && stickDir != want) inputKey(stickDir, false);
+        if (stickV != -1 && stickV != wantV) inputKey(stickV, false);
+        if (want != -1 && want != stickDir) inputKey(want, true);
+        if (wantV != -1 && wantV != stickV) inputKey(wantV, true);
+        stickDir = want; stickV = wantV;
+    };
     Uint64 t0 = SDL_GetTicks64();
     // Game clock: real time, but a frozen host (window drag/resize on Windows blocks the event loop, debugger, laptop sleep)
     // may only advance it by 100 ms per observation, so the game never sees a huge time jump and never "fast-forwards".
     static Uint64 s_lastReal = t0; static int64_t s_virt = 0;
     auto gameClock = [t0]() -> int64_t { Uint64 r = SDL_GetTicks64(); Uint64 d = r - s_lastReal; s_lastReal = r; s_virt += (int64_t)std::min<Uint64>(d, 100); (void)t0; return s_virt; };
     if (!hl) g_clockFn = gameClock;
+    g_beforeTick = diagonalTick;
     gameInit(0);
     if (hl) {
         if (dumpEvery) std::filesystem::create_directories(dumpDir);
@@ -386,7 +402,7 @@ int main(int argc, char** argv) {
 
     // ---- interactive loop ----
     struct Inj { int64_t ms; int kind; int a, b; bool done; }; std::vector<Inj> inj;      // synthetic SDL events for self-test
-    { std::stringstream ss(inject); std::string it; while (std::getline(ss, it, ';')) { long long t; int a = 0, b = 0; char k[16]; if (sscanf(it.c_str(), "%lld:%15[a-z]:%d:%d", &t, k, &a, &b) >= 3) { inj.push_back({t, !strcmp(k, "key") ? 1 : !strcmp(k, "shot") ? 2 : !strcmp(k, "stall") ? 3 : 0, a, b, false}); } } }
+    { std::stringstream ss(inject); std::string it; while (std::getline(ss, it, ';')) { long long t; int a = 0, b = 0; char k[16]; if (sscanf(it.c_str(), "%lld:%15[a-z]:%d:%d", &t, k, &a, &b) >= 3) { inj.push_back({t, !strcmp(k, "key") ? 1 : !strcmp(k, "shot") ? 2 : !strcmp(k, "stall") ? 3 : !strcmp(k, "kd") ? 4 : !strcmp(k, "ku") ? 5 : !strcmp(k, "stick") ? 6 : 0, a, b, false}); } } }      // kd / ku = key down / key up (hold keys), stick = left stick position (x, y)
     bool running = true, paused = false; int pauseBGM = -1; int shot = 0; uint64_t frameCount = 0;
     SDL_GameController* pad = nullptr;
     auto openPad = [&]() { if (pad) return; for (int i = 0; i < SDL_NumJoysticks(); i++) if (SDL_IsGameController(i)) { pad = SDL_GameControllerOpen(i); if (pad) { fprintf(stderr, "controller: %s\n", SDL_GameControllerName(pad)); break; } } };
@@ -404,6 +420,8 @@ int main(int argc, char** argv) {
             j.done = true; SDL_Event s{};
             if (j.kind == 2) { savePng("selftest_" + std::to_string(j.a) + ".png"); continue; }
             if (j.kind == 3) { SDL_Delay((Uint32)j.a); continue; }          // simulate the event loop being frozen (e.g. window drag-resize on Windows)
+            if (j.kind == 6) { applyStick(j.a, j.b); continue; }
+            if (j.kind == 4 || j.kind == 5) { s.type = j.kind == 4 ? SDL_KEYDOWN : SDL_KEYUP; s.key.keysym.scancode = (SDL_Scancode)j.a; SDL_PushEvent(&s); continue; }
             if (j.kind == 1) { s.type = SDL_KEYDOWN; s.key.keysym.scancode = (SDL_Scancode)j.a; SDL_PushEvent(&s); s.type = SDL_KEYUP; SDL_PushEvent(&s); }
             else { int wx = j.a * 1, wy = j.b * 1; SDL_Window* w = win; int ww, wh; SDL_GetWindowSize(w, &ww, &wh); (void)ww; (void)wh; s.type = SDL_MOUSEBUTTONDOWN; s.button.button = SDL_BUTTON_LEFT; s.button.x = wx; s.button.y = wy; SDL_PushEvent(&s);
                    s.type = SDL_MOUSEBUTTONUP; SDL_PushEvent(&s); }
@@ -429,19 +447,7 @@ int main(int argc, char** argv) {
                     if (want != trig) { trig = want; dashPress(want); }
                     break; }
                 if (e.caxis.axis != SDL_CONTROLLER_AXIS_LEFTX && e.caxis.axis != SDL_CONTROLLER_AXIS_LEFTY) break;
-                int ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX), ay = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
-                int want = -1, wantV = -1; int mag = std::max(abs(ax), abs(ay));
-                bool wasActive = stickDir != -1; int thr = wasActive ? 12000 : 18000;           // hysteresis
-                if (mag > thr) {
-                    int h = ax > 0 ? 61 : 60, v = ay > 0 ? 59 : 58;
-                    bool diag = g_eightWay && inGameplay() && std::min(abs(ax), abs(ay)) * 1000 > std::max(abs(ax), abs(ay)) * 414;   // within 22.5 deg of a diagonal
-                    if (diag) { want = h; wantV = v; } else want = abs(ax) > abs(ay) ? h : v;
-                }
-                if (stickDir != -1 && stickDir != want) inputKey(stickDir, false);
-                if (stickV != -1 && stickV != wantV) inputKey(stickV, false);
-                if (want != -1 && want != stickDir) inputKey(want, true);
-                if (wantV != -1 && wantV != stickV) inputKey(wantV, true);
-                stickDir = want; stickV = wantV;
+                applyStick(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX), SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY));
                 break; }
             case SDL_KEYDOWN: case SDL_KEYUP: {
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F11) { Uint32 f = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP; SDL_SetWindowFullscreen(win, f ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP); break; }

@@ -220,6 +220,8 @@ static bool isDir(int k) { return k == 58 || k == 59 || k == 60 || k == 61; }
 // 8-way movement: the game reads a single direction key per tick, so while a horizontal and a vertical direction are held in the world we alternate between
 // them tick by tick (not loop by loop: the game ticks every second or third loop, which would keep landing on the same direction). The hero then moves diagonally using the game's own movement and collision (at about 0.7 of the straight-line speed, like a normalised diagonal).
 static bool g_eightWay = true, g_diagPhase = false, g_diagBoost = true;
+static uint32_t g_atkUntil = 0;                                            // SDL ticks until which an attack/skill is in progress: diagonals stop alternating so the attack is not interrupted
+static bool attacking() { return g_keyRef[62] > 0 || SDL_GetTicks() < g_atkUntil; }
 static bool inGameplay();
 static int wantDir() {
     if (g_dirStack.empty()) return -1;
@@ -227,6 +229,7 @@ static int wantDir() {
     int h = -1, v = -1;                                                      // most recently pressed horizontal / vertical direction
     for (int i = (int)g_dirStack.size() - 1; i >= 0 && (h < 0 || v < 0); i--) { int k = g_dirStack[i]; if (k == 60 || k == 61) { if (h < 0) h = k; } else if (v < 0) v = k; }
     if (h < 0 || v < 0) return h >= 0 ? h : v;
+    if (attacking()) return h;                                               // attacks take priority over the diagonal: along the horizontal direction only, like plain left / right
     return g_diagPhase ? h : v;
 }
 static void dirSync() {
@@ -275,13 +278,14 @@ static void inputKey(int gk, bool down) {
             // Aim steering: the game only updates the hero's facing (g_tHeroProp+4: 0 = right, 1 = left) while idle or walking, so mashing
             // attack keeps swinging the old way. Set it from the horizontal direction currently held right before the attack starts.
             if (gk == 62 && g_aimSteer) { for (int i = (int)g_dirStack.size() - 1; i >= 0; i--) if (g_dirStack[i] == 60 || g_dirStack[i] == 61) { steerHero(g_dirStack[i] == 60); break; } }
+            if (gk == 62 || gk == 49 || gk == 51 || gk == 55 || gk == 57 || gk == 48) { g_atkUntil = SDL_GetTicks() + 450; dirSync(); }
             pushEvent(2, gk, -1);
         }
     } else {
         if (r <= 0) { r = 0; return; }
         if (--r > 0) return;
         if (isDir(gk)) { g_dirStack.erase(std::remove(g_dirStack.begin(), g_dirStack.end(), gk), g_dirStack.end()); dirSync(); }
-        else pushEvent(3, gk, -1);
+        else { pushEvent(3, gk, -1); if (gk == 62) g_atkUntil = SDL_GetTicks() + 450; }
     }
 }
 

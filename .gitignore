@@ -1,0 +1,23 @@
+# downloaded / built by the build scripts
+third_party/
+build/
+build-win/
+build-linux/
+*.o
+*.a
+# never commit game files or user data
+*.apk
+*.obb
+Com2uS/
+save/
+libgame.so
+resources.csr
+*.wav
+# build outputs (publish these as GitHub Releases instead)
+CaligoChaser.exe
+CaligoChaser
+cchost
+# test output
+frames/
+*.png
+snap_*.bin

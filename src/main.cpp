@@ -390,7 +390,7 @@ int main(int argc, char** argv) {
     }
 #ifdef __ANDROID__
     {   // Android: everything lives in the app's own folder (Android/data/<package>/files), which the user can fill with a file manager or adb: the APK plus the Com2uS folder; saves go next to them
-        g_hideTouchUi = false; hud::enabled = false; g_hintsMode = -2; fullscreen = true;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
+        g_hideTouchUi = false; hud::enabled = false; g_hintsMode = -2; fullscreen = true; gl::rs = 1.f;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
         const char* ext = SDL_AndroidGetExternalStoragePath(); const char* inr = SDL_AndroidGetInternalStoragePath(); std::string base = ext ? ext : "/sdcard";
         { std::error_code e0; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e0)) base = inr; }          // files copied in with adb (or a file manager that cannot write into Android/data) live in the private folder instead
         if (g_dataRoot == ".") g_dataRoot = base; if (g_saveRoot == "save") g_saveRoot = base + "/save";
@@ -605,6 +605,9 @@ int main(int argc, char** argv) {
                 if (e.type != SDL_MOUSEMOTION && e.button.button != SDL_BUTTON_LEFT) break;
                 int wx = e.type == SDL_MOUSEMOTION ? e.motion.x : e.button.x, wy = e.type == SDL_MOUSEMOTION ? e.motion.y : e.button.y;
                 float lx, ly; if (gl::hw::on) gl::hw::windowToLogical(wx, wy, lx, ly); else SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly); lx /= gl::rs; ly /= gl::rs;
+#ifdef __ANDROID__
+                { int ow = 0, oh = 0, ww2 = 0, wh2 = 0; SDL_GetRendererOutputSize(ren, &ow, &oh); SDL_GetWindowSize(win, &ww2, &wh2); SDL_Log("touch ev=%d win=%d,%d (window %dx%d, output %dx%d) logical=%.0f,%.0f rs=%.1f", (int)e.type, wx, wy, ww2, wh2, ow, oh, lx, ly, (float)gl::rs); }
+#endif
                 if (hud::enabled && hud::active) hud::unmapTouch(lx, ly);                // the gameplay HUD is re-laid-out: translate back to where the game expects things
                 if (e.type == SDL_MOUSEBUTTONDOWN) { g_touch.down = true; SDL_CaptureMouse(SDL_TRUE); touchEvent(0, lx, ly, now); }
                 else if (e.type == SDL_MOUSEBUTTONUP) { SDL_CaptureMouse(SDL_FALSE); if (g_touch.down) { g_touch.down = false; touchEvent(1, lx, ly, now); } }
@@ -613,13 +616,20 @@ int main(int argc, char** argv) {
             }
         }
         if (!paused) {
+            Uint64 pc0 = SDL_GetPerformanceCounter();
             inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();
+#ifdef __ANDROID__
+            static double accG = 0, accP = 0; static int accN = 0; Uint64 pc1 = SDL_GetPerformanceCounter(); accG += (double)(pc1 - pc0) * 1000.0 / perfFreq;
+#endif
             g_hintBm = currentHints();
             if (gl::hw::on) gl::hw::present(titleHighlightIndex(), g_hintBm);
             else {
                 SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
                 SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr); SDL_RenderPresent(ren);
             }
+#ifdef __ANDROID__
+            { Uint64 pc2 = SDL_GetPerformanceCounter(); accP += (double)(pc2 - pc1) * 1000.0 / perfFreq; if (++accN == 120) { SDL_Log("perf: game %.1f ms, present %.1f ms per frame (%d fps cap)", accG / 120, accP / 120, fpsCap); accG = accP = 0; accN = 0; } }
+#endif
             if (fpsCap > 0) {                                                       // frame limiter: sleep most of the remaining time, spin for the last millisecond
                 nextFrame += perfFreq / fpsCap; Uint64 nc = SDL_GetPerformanceCounter();
                 if (nc > nextFrame + perfFreq / 20) nextFrame = nc;                  // fell far behind (stall, window drag): don't try to catch up

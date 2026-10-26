@@ -1,7 +1,7 @@
-﻿cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.22)
 project(caligochaser CXX C)
 set(CMAKE_CXX_STANDARD 17)
-set(T "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party")   # fetched by android/fetch-deps.ps1 (SDL2, Unicorn, miniz, stb)
+set(T "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party" CACHE PATH "folder with SDL2-2.30.9, unicorn, stb, miniz (Unicorn's configure step breaks on paths with spaces: pass e.g. -DT=C:/caligo-chaser-build/third_party)")   # fetched by android/fetch-deps.ps1 (SDL2, Unicorn, miniz, stb)
 set(SDL_STATIC OFF CACHE BOOL "" FORCE)
 set(SDL_TEST OFF CACHE BOOL "" FORCE)
 add_subdirectory("${T}/SDL2-2.30.9" SDL2)
@@ -12,3 +12,4 @@ add_library(main SHARED ../../../src/main.cpp "${T}/stb/stb_vorbis.c" "${T}/mini
 target_include_directories(main PRIVATE ../../../src "${T}/unicorn/include" "${T}/miniz" "${T}/SDL2-2.30.9/include")
 target_compile_options(main PRIVATE -O3 -fno-strict-aliasing)
 target_link_libraries(main SDL2 unicorn log android)
+

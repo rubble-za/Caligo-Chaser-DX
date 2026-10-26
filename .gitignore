@@ -31,3 +31,4 @@ android/app/build/
 android/app/.cxx/
 android/local.properties
 android/build/
+android/app/src/main/jniLibs/

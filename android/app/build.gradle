@@ -1,4 +1,4 @@
-﻿plugins { id 'com.android.application' }
+plugins { id 'com.android.application' }
 android {
     namespace 'com.caligo.port'
     compileSdk 34
@@ -9,9 +9,8 @@ android {
         versionCode 1
         versionName '0.1.0'
         ndk { abiFilters 'arm64-v8a' }
-        externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_shared' } }
     }
+    // The native libraries (libmain.so = the port, libSDL2.so, libc++_shared.so) are built by build-android.ps1 into src/main/jniLibs
     sourceSets.main.java.srcDirs += ['../../third_party/SDL2-2.30.9/android-project/app/src/main/java']
-    externalNativeBuild { cmake { path 'jni/CMakeLists.txt'; version '3.22.1' } }
     buildTypes { release { minifyEnabled false; signingConfig signingConfigs.debug } }
 }

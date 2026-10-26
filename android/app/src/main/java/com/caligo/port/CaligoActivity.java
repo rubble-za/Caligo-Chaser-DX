@@ -1,4 +1,4 @@
-﻿package com.caligo.port;
+package com.caligo.port;
 
 import org.libsdl.app.SDLActivity;
 

@@ -1,4 +1,7 @@
 plugins { id 'com.android.application' }
+// Build outputs go outside the project folder when CC_BUILD_ROOT is set (OneDrive / network shares lock files in build folders)
+def br = System.getenv('CC_BUILD_ROOT')
+if (br) layout.buildDirectory = file("$br/android-gradle")
 android {
     namespace 'com.caligo.port'
     compileSdk 34

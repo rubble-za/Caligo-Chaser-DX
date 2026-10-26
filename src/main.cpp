@@ -371,8 +371,22 @@ static void usage() {
         "Testing: --headless <frames> [--script \"400:tap:400:240;...\"] [--dump-every N --dump-dir D] [--trace]\n");
 }
 
-int main(int argc, char** argv) {
-    std::string apk, script, inject, dumpDir = "frames"; double runSeconds = 0; int headless = -1, dumpEvery = 0, scale = 1; bool fullscreen = false, softFlag = false, gpuFlag = false; int fpsCap = -1;                                                    // -1 = auto (see below)
+#ifdef __ANDROID__
+// A private test build can carry the user's own game files inside the app (assets/files.txt lists them, one path per line): on first launch they are unpacked into the app's private folder.
+static void extractBundledAssets(const std::string& dst) {
+    SDL_RWops* m = SDL_RWFromFile("files.txt", "rb"); if (!m) return;
+    std::string list; char buf[4096]; size_t n; while ((n = SDL_RWread(m, buf, 1, sizeof buf)) > 0) list.append(buf, n); SDL_RWclose(m);
+    std::stringstream ss(list); std::string rel;
+    while (std::getline(ss, rel)) {
+        while (!rel.empty() && (rel.back() == '\r' || rel.back() == ' ')) rel.pop_back(); if (rel.empty()) continue;
+        SDL_RWops* in = SDL_RWFromFile(rel.c_str(), "rb"); if (!in) { SDL_Log("bundled file missing: %s", rel.c_str()); continue; }
+        std::string out = dst + "/" + rel; std::error_code ec; std::filesystem::create_directories(std::filesystem::path(out).parent_path(), ec);
+        FILE* f = fopen(out.c_str(), "wb"); if (f) { while ((n = SDL_RWread(in, buf, 1, sizeof buf)) > 0) fwrite(buf, 1, n, f); fclose(f); }
+        SDL_RWclose(in);
+    }
+}
+#endif
+int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = "frames"; double runSeconds = 0; int headless = -1, dumpEvery = 0, scale = 1; bool fullscreen = false, softFlag = false, gpuFlag = false; int fpsCap = -1;                                                    // -1 = auto (see below)
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i]; auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
         if (a == "--apk") apk = next(); else if (a == "--data") g_dataRoot = next(); else if (a == "--save") g_saveRoot = next();
@@ -393,6 +407,7 @@ int main(int argc, char** argv) {
         g_hideTouchUi = false; hud::enabled = false; g_hintsMode = -2; fullscreen = true; gl::g_fastQuad = true; gl::rs = 1.f;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
         const char* ext = SDL_AndroidGetExternalStoragePath(); const char* inr = SDL_AndroidGetInternalStoragePath(); std::string base = ext ? ext : "/sdcard";
         { std::error_code e0; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e0)) base = inr; }          // files copied in with adb (or a file manager that cannot write into Android/data) live in the private folder instead
+        { std::error_code e1; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e1)) extractBundledAssets(base); }          // a bundled test build: unpack the game files it carries (first launch only)
         if (g_dataRoot == ".") g_dataRoot = base; if (g_saveRoot == "save") g_saveRoot = base + "/save";
         if (apk.empty()) { std::error_code ec; for (auto& e : std::filesystem::directory_iterator(base, ec)) if (e.path().extension() == ".apk") { apk = e.path().string(); break; } }
         std::error_code ec2; if (apk.empty() || !std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr", ec2)) { SDL_Log("base=%s apk=%s ec=%s", base.c_str(), apk.c_str(), ec2.message().c_str()); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Caligo Chaser", ("Copy your APK and the Com2uS folder into:\n" + base).c_str(), nullptr); return 1; }

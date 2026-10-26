@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Continue'; $root = Split-Path $PSScriptRoot; $B = 'C:\caligo-chaser-build'; $sdk = 'C:\android-sdk'; $ndk = "$sdk\ndk\26.3.11579264"; $T = "$B\third_party"
 $env:JAVA_HOME = (Get-ChildItem 'C:\Program Files\Microsoft\jdk-17*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = $sdk; $env:CC_BUILD_ROOT = $B
 $env:Path = "$T\stubs;C:\Program Files\Git\usr\bin;C:\Program Files\Git\cmd;$env:Path"
-if (-not (Test-Path "$T\unicorn")) { Write-Host 'Run build-windows.ps1 once first (it fetches the dependencies into C:\caligo-chaser-build\third_party).'; exit 1 }
+if (-not (Test-Path "$T\dynarmic")) { Write-Host 'Run build-windows.ps1 once first (it fetches the dependencies into C:\caligo-chaser-build\third_party).'; exit 1 }
 & "$sdk\cmake\3.22.1\bin\cmake.exe" -S "$root\android\app\jni" -B "$B\android" -G Ninja "-DCMAKE_MAKE_PROGRAM=$sdk\cmake\3.22.1\bin\ninja.exe" "-DCMAKE_TOOLCHAIN_FILE=$ndk\build\cmake\android.toolchain.cmake" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 -DANDROID_STL=c++_shared -DCMAKE_BUILD_TYPE=Release "-DT=$($T -replace '\\','/')"
 & "$sdk\cmake\3.22.1\bin\ninja.exe" -C "$B\android" SDL2 main
 $j = "$root\android\app\src\main\jniLibs\arm64-v8a"; New-Item -ItemType Directory -Force $j | Out-Null

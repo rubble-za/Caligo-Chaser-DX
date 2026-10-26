@@ -13,8 +13,8 @@ static FILE* hostFile(uint32_t g) { auto it = g_files.find(g); return it == g_fi
 
 // Snapshot of all core registers so host code can re-enter the guest from inside a call hook.
 struct RegSnap { uint32_t r[16]; uint32_t cpsr; };
-static RegSnap saveRegs() { RegSnap s; for (int i = 0; i < 13; i++) s.r[i] = reg(i == 0 ? R0 : i == 1 ? R1 : i == 2 ? R2 : i == 3 ? R3 : UC_ARM_REG_R4 + (i - 4)); s.r[13] = reg(SP); s.r[14] = reg(LR); s.r[15] = reg(PC); uc_reg_read(g_uc, UC_ARM_REG_CPSR, &s.cpsr); return s; }
-static void loadRegs(const RegSnap& s) { for (int i = 0; i < 13; i++) setreg(i == 0 ? R0 : i == 1 ? R1 : i == 2 ? R2 : i == 3 ? R3 : UC_ARM_REG_R4 + (i - 4), s.r[i]); setreg(SP, s.r[13]); setreg(LR, s.r[14]); uc_reg_write(g_uc, UC_ARM_REG_CPSR, &s.cpsr); }
+static RegSnap saveRegs() { RegSnap s; for (int i = 0; i < 13; i++) s.r[i] = reg(R0 + i); s.r[13] = reg(SP); s.r[14] = reg(LR); s.r[15] = reg(PC); s.cpsr = reg(CPSR); return s; }
+static void loadRegs(const RegSnap& s) { for (int i = 0; i < 13; i++) setreg(R0 + i, s.r[i]); setreg(SP, s.r[13]); setreg(LR, s.r[14]); setreg(CPSR, s.cpsr); }
 static uint32_t callGuestNested(uint32_t fn, std::vector<uint32_t> args) {
     RegSnap s = saveRegs();
     uint32_t sp = (s.r[13] - 256) & ~7u;                 // leave the interrupted frame untouched
@@ -135,8 +135,8 @@ static void registerImports() {
     I("pow", [] { double d = pow(argd(0), argd(2)); uint64_t u; memcpy(&u, &d, 8); ret64(u); });
 
     // ---- setjmp/longjmp (jmp_buf: r4-r11, sp, lr) ----
-    I("setjmp",  [] { uint32_t b = arg(0); for (int i = 0; i < 8; i++) wr32(b + 4 * i, reg(UC_ARM_REG_R4 + i)); wr32(b + 32, reg(SP)); wr32(b + 36, reg(LR)); ret(0); });
-    I("longjmp", [] { uint32_t b = arg(0), v = arg(1); for (int i = 0; i < 8; i++) setreg(UC_ARM_REG_R4 + i, rd32(b + 4 * i)); setreg(SP, rd32(b + 32)); setreg(LR, rd32(b + 36)); ret(v ? v : 1); });
+    I("setjmp",  [] { uint32_t b = arg(0); for (int i = 0; i < 8; i++) wr32(b + 4 * i, reg(R4 + i)); wr32(b + 32, reg(SP)); wr32(b + 36, reg(LR)); ret(0); });
+    I("longjmp", [] { uint32_t b = arg(0), v = arg(1); for (int i = 0; i < 8; i++) setreg(R4 + i, rd32(b + 4 * i)); setreg(SP, rd32(b + 32)); setreg(LR, rd32(b + 36)); ret(v ? v : 1); });
 
     // ---- threads: the game never creates threads, so locks are no-ops ----
     for (const char* n : {"pthread_mutex_init", "pthread_mutex_destroy", "pthread_mutex_lock", "pthread_mutex_unlock", "pthread_mutex_trylock", "pthread_mutexattr_init",

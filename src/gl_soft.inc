@@ -82,7 +82,7 @@ static void fetch(const VA& a, int first, int count, bool isColor, bool isNormal
     int es = typeSize(a.type), stride = a.stride ? a.stride : es * a.size;
     out.assign((size_t)count * 4, 0.f);
     std::vector<uint8_t> raw((size_t)stride * count + 16);
-    uc_mem_read(g_uc, a.ptr + (uint32_t)first * stride, raw.data(), (size_t)stride * (count - 1) + es * a.size);
+    rdbuf(a.ptr + (uint32_t)first * stride, raw.data(), (size_t)stride * (count - 1) + es * a.size);
     for (int i = 0; i < count; i++) for (int c = 0; c < a.size && c < 4; c++) {
         const uint8_t* p = &raw[(size_t)i * stride + c * es]; float v = 0;
         switch (a.type) {

@@ -35,6 +35,7 @@ static bool saveGuestFb(const std::string& path) {
 // ---- boot: map memory, wire imports, load libgame.so, run constructors + JNI_OnLoad ----
 
 static bool g_wlog = false;
+#ifdef CC_UNICORN
 static void onMemWrite(uc_engine*, uc_mem_type, uint64_t addr, int size, int64_t value, void*) {
     static long wa = getenv("CC_WADDR") ? (long)strtoul(getenv("CC_WADDR"), nullptr, 16) : -1;
     if (wa >= 0) { if ((uint32_t)addr >= LIB_BASE + (uint32_t)wa && (uint32_t)addr < LIB_BASE + (uint32_t)wa + 4) fprintf(stderr, "WA f=%lld val=%lld pc=lib+%x now=%lld\n", (long long)g_nowMs, (long long)value, reg(PC) - LIB_BASE, (long long)g_nowMs); return; }
@@ -43,6 +44,7 @@ static void onMemWrite(uc_engine*, uc_mem_type, uint64_t addr, int size, int64_t
     if (a >= LIB_BASE + 0x11d038 && a < LIB_BASE + 0x31d038) return;                       // texture buffer
     fprintf(stderr, "WR %08x sz=%d val=%lld pc=lib+%x\n", a, size, (long long)value, reg(PC) - LIB_BASE);
 }
+#endif
 static bool g_hideTouchUi = true;
 static bool g_noMoreGames = true;
 static int peekInt(const char* n);
@@ -51,7 +53,7 @@ static int peekInt(const char* n);
 static std::vector<uint32_t> g_presentTmp;
 static const ov::Bitmap* g_hintBm = nullptr;                                      // input-hint strip to show on this frame (null = none), see overlay.inc
 // The title menu is state 4, but for its first frames (g_nTitleToMainFra counting 0..10) the previous screen is still showing.
-static std::map<uint32_t, uint64_t> g_profile;
+static std::map<uint32_t, uint64_t> g_profile;   // CC_PROFILE (Unicorn build only)
 static void profileReport() {
     std::vector<std::pair<uint64_t, uint32_t>> v; uint64_t tot = 0; for (auto& kv : g_profile) { v.push_back({kv.second, kv.first}); tot += kv.second; } std::sort(v.rbegin(), v.rend());
     fprintf(stderr, "PROFILE total %llu\n", (unsigned long long)tot); for (size_t i = 0; i < v.size() && i < 400; i++) fprintf(stderr, "PROF %08x %llu\n", v[i].second, (unsigned long long)v[i].first);
@@ -141,41 +143,32 @@ static const ov::Bitmap* currentHints() {
     if (g_hintsMode == -2) return nullptr;
     return ov::get(hintCtx(), g_hintsMode >= 0 ? (ov::Dev)g_hintsMode : g_inDev, g_padStyle, gl::fbW, gl::fbH);
 }
-static void hideMoreGames(uc_engine*, uint64_t, uint32_t, void*) { if (reg(R0) == 0x952 && peekInt("nState") == 4) setreg(PC, reg(LR)); }
 static bool g_noOnline = true;
-static void blockNetState(uc_engine*, uint64_t, uint32_t, void*) { if (reg(R0) == 8) { if (g_trace) fprintf(stderr, "blocked SetCurrentState(8) = online/Network state\n"); setreg(PC, reg(LR)); } }   // state 8 = Network
-static void skipFunction(uc_engine*, uint64_t, uint32_t, void*) { setreg(PC, reg(LR)); }   // "return immediately" (LR keeps the Thumb bit)
 static void bootHost(const std::vector<uint8_t>& lib) {
-    UC_CHECK(uc_open(UC_ARCH_ARM, UC_MODE_ARM, &g_uc));
-    UC_CHECK(uc_mem_map(g_uc, STUB_BASE, STUB_SIZE, UC_PROT_ALL));
-    UC_CHECK(uc_mem_map(g_uc, DATA_BASE, DATA_SIZE, UC_PROT_ALL));
-    UC_CHECK(uc_mem_map(g_uc, RET_ADDR, 0x1000, UC_PROT_ALL));
-    UC_CHECK(uc_mem_map(g_uc, STACK_BASE, STACK_SIZE, UC_PROT_ALL));
-    UC_CHECK(uc_mem_map(g_uc, HEAP_BASE, HEAP_SIZE, UC_PROT_ALL));
-    setreg(SP, STACK_BASE + STACK_SIZE - 64);
+    cpuInit();
     registerImports(); registerGL(); registerJava();
     for (int i = 0; i < 240; i++) wr32(ENVTAB + 4 * i, stubFor("JNI:" + std::to_string(i)));   // every JNIEnv slot is a stub
     wr32(ENV_ADDR, ENVTAB); wr32(VM_ADDR, VMTAB);
     for (int i = 0; i < 8; i++) wr32(VMTAB + 4 * i, stubFor("JVM:" + std::to_string(i)));
-    uc_hook h1, h2;
-    UC_CHECK(uc_hook_add(g_uc, &h1, UC_HOOK_CODE, (void*)onCode, nullptr, STUB_BASE, STUB_BASE + STUB_SIZE - 1));
-    UC_CHECK(uc_hook_add(g_uc, &h2, UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED | UC_HOOK_MEM_FETCH_UNMAPPED, (void*)onMemInvalid, nullptr, 1, 0));
+    cpuInstallHooks();
+#ifdef CC_UNICORN
     if (getenv("CC_PROFILE")) { static uc_hook hp; UC_CHECK(uc_hook_add(g_uc, &hp, UC_HOOK_BLOCK, (void*)+[](uc_engine*, uint64_t a, uint32_t sz, void*) { g_profile[(uint32_t)(a - LIB_BASE)] += sz; }, nullptr, LIB_BASE, LIB_BASE + 0x400000)); }   // dev: CC_PROFILE=1 counts guest instructions (approx. bytes) per basic block; the top blocks are printed at the end of a headless run
     if (getenv("CC_HOOKVK")) { static uc_hook hv; UC_CHECK(uc_hook_add(g_uc, &hv, UC_HOOK_CODE, (void*)+[](uc_engine* uc, uint64_t, uint32_t, void*) { uint32_t a = 0, b = 0; uc_reg_read(uc, UC_ARM_REG_R0, &a); uc_reg_read(uc, UC_ARM_REG_R1, &b); fprintf(stderr, "[VK] GetGameVirtualTouchKey(%d, %d)\n", (int)a, (int)b); }, nullptr, LIB_BASE + 0x71a08, LIB_BASE + 0x71a08)); }   // dev: what the game passes to its on-screen-button hit test
     if (getenv("CC_WLOG") || getenv("CC_WADDR")) { static uc_hook hw; UC_CHECK(uc_hook_add(g_uc, &hw, UC_HOOK_MEM_WRITE, (void*)onMemWrite, nullptr, 1, 0)); }   // debug only: a global write hook makes every guest store call back into the host
+#endif
     uint32_t ninit = loadLibMem(lib);
     for (uint32_t i = 0; i < ninit; i++) callGuest(g_exports["__init_" + std::to_string(i)]);
     if (g_hideTouchUi) {                                          // desktop: skip the on-screen d-pad / action-button overlay (DrawViewGameVirtualKey)
         auto it = g_exports.find("DrawViewGameVirtualKey");
-        if (it != g_exports.end()) { static uc_hook hv; uint32_t a = it->second & ~1u; UC_CHECK(uc_hook_add(g_uc, &hv, UC_HOOK_CODE, (void*)skipFunction, nullptr, a, a)); }
+        if (it != g_exports.end()) cpuHookFunction(it->second, [] { return true; });                 // return immediately
     }
     if (g_noMoreGames) {                                           // title menu: drop the "More Games" entry (its image is id 0x952)
         auto it = g_exports.find("DrawManagerImage");
-        if (it != g_exports.end()) { static uc_hook hm; uint32_t a = it->second & ~1u; UC_CHECK(uc_hook_add(g_uc, &hm, UC_HOOK_CODE, (void*)hideMoreGames, nullptr, a, a)); }
+        if (it != g_exports.end()) cpuHookFunction(it->second, [] { return reg(R0) == 0x952 && peekInt("nState") == 4; });
     }
     if (g_noOnline) {                                              // no online mode: never enter the Network state (shop/trade/mail/ranking servers are gone)
         auto it = g_exports.find("SetCurrentState");
-        if (it != g_exports.end()) { static uc_hook hn; uint32_t a = it->second & ~1u; UC_CHECK(uc_hook_add(g_uc, &hn, UC_HOOK_CODE, (void*)blockNetState, nullptr, a, a)); }
+        if (it != g_exports.end()) cpuHookFunction(it->second, [] { if (reg(R0) != 8) return false; if (g_trace) fprintf(stderr, "blocked SetCurrentState(8) = online/Network state\n"); return true; });   // state 8 = Network
     }
     uint32_t r = callGuest(g_exports["JNI_OnLoad"], {VM_ADDR, 0});
     if (g_trace) fprintf(stderr, "JNI_OnLoad -> 0x%x\n", r);

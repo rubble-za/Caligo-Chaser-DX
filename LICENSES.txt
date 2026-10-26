@@ -1,10 +1,11 @@
 This package contains NO game code or assets. The game is read at run time from YOUR copy of the APK and data folder.
 
 Components built into the executable:
-  Unicorn Engine 2.1.3 ........ GPL-2.0   (CPU emulator; because it is linked in, the executable as a whole is GPL-2.0 and the
-                                           complete source of this host is in the GitHub repository Caligo-Chaser-PC-Port)
+  dynarmic (6.6.x) ............ 0BSD      (ARM JIT that runs the game's code; with its bundled mcl, fmt, Zydis/Zycore, xbyak, robin-map: MIT / BSD-3 / MIT)
+  Boost headers 1.84 .......... BSL-1.0   (header-only use by dynarmic)
   SDL 2.30.9 .................. zlib
   miniz 3.0.2 ................. MIT
   stb_vorbis .................. public domain / MIT
+Optional builds made with -DCC_UNICORN use Unicorn Engine 2.1.3 (GPL-2.0) instead of dynarmic; such a build is GPL-2.0 as a whole.
 The host code in the repository's src folder (main.cpp, host.cpp, *.inc) is offered under GPL-2.0-or-later.
 Caligo Chaser and its assets belong to Com2uS; use only copies you are entitled to use.

@@ -1,7 +1,6 @@
 // Caligo Chaser host: loads the original 32-bit ARM libgame.so into Unicorn,
 // resolves its imports to host-side implementations (libc, GLES1, JNI).
 // Stage 1: loader + import tracing.
-#include <unicorn/unicorn.h>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -31,30 +30,9 @@ enum { PT_LOAD = 1, PT_DYNAMIC = 2 };
 enum { DT_NULL = 0, DT_HASH = 4, DT_STRTAB = 5, DT_SYMTAB = 6, DT_REL = 17, DT_RELSZ = 18, DT_JMPREL = 23, DT_PLTRELSZ = 2, DT_INIT_ARRAY = 25, DT_INIT_ARRAYSZ = 27, DT_STRSZ = 10 };
 enum { R_ARM_ABS32 = 2, R_ARM_GLOB_DAT = 21, R_ARM_JUMP_SLOT = 22, R_ARM_RELATIVE = 23 };
 
-// ---------- guest address space ----------
-static const uint32_t LIB_BASE   = 0x10000000, LIB_SIZE = 0x00500000;
-static const uint32_t STUB_BASE  = 0x20000000, STUB_SIZE = 0x00010000;   // 4 bytes per stub: "bx lr"
-static const uint32_t DATA_BASE  = 0x21000000, DATA_SIZE = 0x00100000;   // misc guest data (JNIEnv, __sF, ...)
-static const uint32_t STACK_BASE = 0x30000000, STACK_SIZE = 0x00800000;
-static const uint32_t HEAP_BASE  = 0x40000000, HEAP_SIZE = 0x10000000;
-static const uint32_t RET_ADDR   = 0x22000000;                           // sentinel return address
-
-static uc_engine* g_uc;
 static bool g_traceFiles = false;
 static bool g_trace = false;
-
-static void die(const char* msg) { fprintf(stderr, "FATAL: %s\n", msg); exit(1); }
-#define UC_CHECK(x) do { uc_err e_ = (x); if (e_ != UC_ERR_OK) { fprintf(stderr, "uc error %s at %s:%d\n", uc_strerror(e_), __FILE__, __LINE__); exit(1);} } while (0)
-
-static uint32_t rd32(uint32_t a) { uint32_t v = 0; UC_CHECK(uc_mem_read(g_uc, a, &v, 4)); return v; }
-static void wr32(uint32_t a, uint32_t v) { UC_CHECK(uc_mem_write(g_uc, a, &v, 4)); }
-static std::string rdstr(uint32_t a, size_t max = 4096) {
-    std::string s; char c;
-    while (s.size() < max && uc_mem_read(g_uc, a++, &c, 1) == UC_ERR_OK && c) s.push_back(c);
-    return s;
-}
-static void rdbuf(uint32_t a, void* dst, size_t n) { UC_CHECK(uc_mem_read(g_uc, a, dst, n)); }
-static void wrbuf(uint32_t a, const void* src, size_t n) { UC_CHECK(uc_mem_write(g_uc, a, src, n)); }
+#include "cpu.inc"
 
 // ---------- guest heap (simple size-header allocator with exact-size free lists) ----------
 static uint32_t g_heapTop = HEAP_BASE;
@@ -72,9 +50,6 @@ static void gfree(uint32_t p) { if (!p) return; g_free[rd32(p - 8)].push_back(p)
 static uint32_t gsize(uint32_t p) { return rd32(p - 8); }
 
 // ---------- call context for import handlers ----------
-enum { R0 = UC_ARM_REG_R0, R1 = UC_ARM_REG_R1, R2 = UC_ARM_REG_R2, R3 = UC_ARM_REG_R3, SP = UC_ARM_REG_SP, LR = UC_ARM_REG_LR, PC = UC_ARM_REG_PC };
-static uint32_t reg(int r) { uint32_t v; uc_reg_read(g_uc, r, &v); return v; }
-static void setreg(int r, uint32_t v) { uc_reg_write(g_uc, r, &v); }
 static uint32_t arg(int i) { return i < 4 ? reg(R0 + i) : rd32(reg(SP) + 4 * (i - 4)); }
 static void ret(uint32_t v) { setreg(R0, v); }
 static void ret64(uint64_t v) { setreg(R0, (uint32_t)v); setreg(R1, (uint32_t)(v >> 32)); }
@@ -147,10 +122,9 @@ static std::map<std::string, int> g_unimplCount;
 static uint32_t stubFor(const std::string& name) {
     auto it = g_stubAddr.find(name);
     if (it != g_stubAddr.end()) return it->second;
-    uint32_t addr = STUB_BASE + 4 * (uint32_t)g_stubs.size();
+    uint32_t addr = STUB_BASE + STUB_STRIDE * (uint32_t)g_stubs.size();
     if (addr >= STUB_BASE + STUB_SIZE) die("stub region full");
-    uint32_t bxlr = 0xe12fff1e;
-    wrbuf(addr, &bxlr, 4);
+    cpuWriteStub((uint32_t)g_stubs.size());
     auto f = g_impl.find(name);
     g_stubs.push_back({name, f == g_impl.end() ? std::function<void()>() : f->second});
     g_stubAddr[name] = addr;
@@ -267,7 +241,7 @@ static uint32_t loadLibMem(const std::vector<uint8_t>& elf) {
     g_elf = elf;
     auto* eh = (Elf32_Ehdr*)g_elf.data();
     if (memcmp(eh->e_ident, "\x7f""ELF", 4) || eh->e_machine != 40) die("not an ARM ELF");
-    UC_CHECK(uc_mem_map(g_uc, LIB_BASE, LIB_SIZE, UC_PROT_ALL));
+    cpuMap(LIB_BASE, LIB_SIZE);
     uint32_t dynOff = 0, dynSz = 0;
     for (int i = 0; i < eh->e_phnum; i++) {
         auto* ph = (Elf32_Phdr*)(g_elf.data() + eh->e_phoff + i * eh->e_phentsize);
@@ -324,25 +298,13 @@ static uint32_t loadLibMem(const std::vector<uint8_t>& elf) {
 
 // ---------- calling into guest ----------
 static uint32_t callGuest(uint32_t fn, std::vector<uint32_t> args = {}) {
-    uint32_t sp = reg(SP);
-    if (!sp) sp = STACK_BASE + STACK_SIZE - 64;
-    sp &= ~7u;
+    uint32_t sp = cpuStackBase() & ~7u;
     // args beyond 4 go on the stack
     if (args.size() > 4) { sp -= 4 * (uint32_t)(args.size() - 4); sp &= ~7u; for (size_t i = 4; i < args.size(); i++) wr32(sp + 4 * (i - 4), args[i]); }
-    for (size_t i = 0; i < args.size() && i < 4; i++) setreg(R0 + (int)i, args[i]);
-    setreg(SP, sp); setreg(LR, RET_ADDR);
-    uint32_t start = fn;                                // bit0 = Thumb, honoured by Unicorn
-    uc_err e = uc_emu_start(g_uc, start, RET_ADDR, 0, 0);
-    if (e != UC_ERR_OK) {
-        uint32_t pc = reg(PC); fprintf(stderr, "emulation error: %s at pc=0x%x (lib+0x%x) lr=0x%x\n", uc_strerror(e), pc, pc - LIB_BASE, reg(LR));
-        for (int i = 0; i < 13; i++) fprintf(stderr, " r%d=%08x", i, reg(R0 + i < R3 + 1 ? R0 + i : UC_ARM_REG_R4 + (i - 4))); fprintf(stderr, "\n");
-        exit(2);
-    }
-    return reg(R0);
+    return cpuCall(fn, args, sp);
 }
 
-static void onCode(uc_engine*, uint64_t addr, uint32_t, void*) {
-    uint32_t i = ((uint32_t)addr - STUB_BASE) / 4;
+static void stubInvoke(uint32_t i) {
     if (i >= g_stubs.size()) return;
     Stub& s = g_stubs[i];
     if (s.name.rfind("JNI:", 0) == 0) { jniCall(atoi(s.name.c_str() + 4)); return; }
@@ -350,10 +312,11 @@ static void onCode(uc_engine*, uint64_t addr, uint32_t, void*) {
     if (s.fn) s.fn();
     else { if (g_unimplCount[s.name]++ == 0) fprintf(stderr, "[import] UNIMPLEMENTED %s(0x%x, 0x%x, 0x%x, 0x%x)\n", s.name.c_str(), arg(0), arg(1), arg(2), arg(3)); ret(0); }
 }
-static bool onMemInvalid(uc_engine*, uc_mem_type type, uint64_t addr, int size, int64_t, void*) {
+#ifdef CC_UNICORN
+static void onMemInvalidUc(uc_engine*, uc_mem_type type, uint64_t addr, int size, int64_t, void*) {
     fprintf(stderr, "invalid memory access type=%d addr=0x%llx size=%d pc=0x%x (lib+0x%x) lr=0x%x\n", type, (unsigned long long)addr, size, reg(PC), reg(PC) - LIB_BASE, reg(LR));
-    return false;
 }
+#endif
 
 #include "imports.inc"
 #include "overlay.inc"

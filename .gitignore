@@ -32,3 +32,6 @@ android/app/.cxx/
 android/local.properties
 android/build/
 android/app/src/main/jniLibs/
+
+# the neutral Android launcher icon (our own artwork) is the one png that belongs in the repo
+!android/app/src/main/res/mipmap-*/ic_launcher.png

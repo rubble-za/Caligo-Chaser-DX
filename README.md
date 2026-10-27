@@ -1,8 +1,8 @@
 # Caligo Chaser Port
 
-A desktop port of the Android game **Caligo Chaser** (Com2uS, APK v1.0.4) for Windows and Linux, with controller, keyboard and mouse support.
+A desktop port of the Android game **Caligo Chaser** (Com2uS, APK v1.0.4) for Windows (and Linux, Android), with controller, keyboard and mouse support.
 
-It is not a rewrite. The original game code is read from **your own copy of the APK** and run in an emulator, while the Android side (window, input, sound, timers, save files) is re-implemented natively. The game's OpenGL ES 1 calls are replayed through desktop OpenGL on your graphics card (with a built-in software renderer as automatic fallback, or `--soft`), and SDL2 provides the window and input.
+It is not a rewrite. The original game code is read from **your own copy of the APK** and run through a JIT compiler (dynarmic), while the Android side (window, input, sound, timers, save files) is re-implemented natively. The game's OpenGL ES 1 calls are replayed through desktop OpenGL on your graphics card (with a built-in software renderer as automatic fallback, or `--soft`), and SDL2 provides the window and input.
 
 ## You must bring your own game files
 
@@ -30,12 +30,13 @@ See `README.txt` for the full controls and options.
 
 ## Building
 
-Windows (native, no installed compiler needed): `powershell -ExecutionPolicy Bypass -File build-windows.ps1`. It downloads llvm-mingw, CMake, Ninja and the libraries into `third_party\` and writes `build-win\CaligoChaser.exe`.
-Linux: `./build-linux.sh` (needs g++, cmake, ninja, git; fetches Unicorn, SDL2, miniz and stb).
+Windows (native, needs only Git for Windows): `powershell -ExecutionPolicy Bypass -File build-windows.ps1`. It downloads llvm-mingw, CMake, Ninja, dynarmic, the Boost headers and the libraries into `third_party\` and writes `build-win\CaligoChaser.exe`.
+Android (arm64, phones with Android 7+): see `android/` - `android\build-android.ps1` builds a debug APK (needs the JDK 17, Android SDK + NDK 26, Gradle). The app asks for your own game APK and Com2uS folder on first launch; `android\build-bundled.ps1` can build a private test APK that carries them (never share that one).
+Linux: `./build-linux.sh` (needs g++, cmake, ninja, git; fetches Unicorn, SDL2, miniz and stb; uses the Unicorn CPU backend, `-DCC_UNICORN`).
 Windows (cross-compiled from Linux with llvm-mingw): `./build-windows-from-linux.sh`.
 
 Prebuilt binaries, if provided, are attached to GitHub Releases rather than committed.
 
 ## Licence
 
-Unicorn Engine is GPL-2.0, so this combined work is distributed under GPL-2.0. See `LICENSES.txt`. Caligo Chaser and its assets belong to Com2uS; this project is unaffiliated.
+The default builds use dynarmic (0BSD); builds made with `-DCC_UNICORN` use Unicorn Engine (GPL-2.0). The host code is offered under GPL-2.0-or-later. See `LICENSES.txt`. Caligo Chaser and its assets belong to Com2uS; this project is unaffiliated.

@@ -62,6 +62,11 @@ CONTROLS
   Stray effect pixels the original game leaves above the hotbar after low attacks are cleaned up automatically
   (--no-strip-fix turns that off).
 
+ANDROID
+  An Android build (arm64, Android 7 or newer) is available as a test APK. It contains no game files: on first launch it asks you to pick your own Caligo Chaser APK (1.0.4) and the Com2uS
+  folder with the system file picker and copies them into the app once. Touch controls are the game's own on-screen d-pad and buttons (one finger at a time); a connected controller also works.
+  The game runs in landscape and the picture is letter-boxed to its 5:3 shape.
+
 SAVES
   Written to the "save" folder next to the program (your original data folder is never modified).
 

@@ -23,11 +23,9 @@ CONTROLS
                 input you used last: controller (D-pad / stick, A, B; PlayStation and Nintendo controllers get their own
                 button symbols), keyboard (arrows, Enter, Esc) or mouse (left / right button). It follows you as you switch
                 devices. --hints off hides it; --hints kb|pad|mouse forces one set.
-  Gameplay screen: in town, dungeons and vendor shops the wide tan bar along the bottom is gone. The world keeps the game's own
-                proportions and fades to dark at the bottom in pixel-sized steps, and only the five hotbar slots (live icons, counts and cooldowns,
-                in a thin gold border) and the EXP bar are drawn, centred. Mouse clicks on the slots and the world work as before.
-                Menus, the world map and conversations keep the game's original layout. --classic-hud turns this off, --no-hotbar hides the
-                hotbar and EXP bar completely, --square-pixels draws the world with square pixels. Vendor shops also show the A / B hint.  F11           fullscreen          F12   screenshot (PNG, next to the program)
+  Gameplay screen: the game keeps its original layout (the tan bar along the bottom with its own hotbar). The game's on-screen d-pad and action buttons are shown after you click or touch the
+                screen and hidden again as soon as you press a key or use a controller, so the picture never changes shape, only the buttons come and go (--touch-ui keeps them always).
+                --hotbar switches to an experimental compact centred hotbar without the tan bar (--no-hotbar hides it completely). Vendor shops show the A / B hint stacked at the bottom right.  F11           fullscreen          F12   screenshot (PNG, next to the program)
   8-way movement: hold two directions (for example Up + Right, or push the stick diagonally) to walk diagonally. The game itself
   only understands one direction at a time, so the two directions are alternated on every game tick, and each step the game
   takes is topped up by about 41% so the hero keeps its full straight-line speed along a diagonal. The hero still uses the
@@ -43,7 +41,7 @@ CONTROLS
     D-pad          in the world (town/dungeon): hotkeys 1/2/3/4 = Up/Right/Down/Left, LB + Up = hotkey 5
                    in menus and on the map select screen: navigates, like the stick
   Window: resizing, minimising or dragging the window no longer disturbs the game (clock is clamped, held input released).
-  On-screen d-pad and action buttons are hidden (run with --touch-ui to show them; mouse clicks on that area still work).
+  On-screen d-pad and action buttons: shown after a click or touch, hidden after a key press or controller input (run with --touch-ui to always show them).
   Aim steering (on by default): when you attack, the hero turns toward the left/right direction you are holding, even in the
   middle of a mashed combo (the game normally only turns you when idle or walking). --no-aim-steer turns it off.
   --aim-follow (experimental, off by default) restarts an attack when you change direction while holding the action button.

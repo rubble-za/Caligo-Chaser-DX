@@ -3,7 +3,7 @@
 // the five slots (icon, count, cooldown) and the EXP label and bar, and draw them in a compact group centred at the bottom with a thin two-tone border we draw ourselves.
 // Nothing is stored: every picture pixel comes from the frame the game just drew. All numbers below are measured from the game's native 384x256 buffer.
 namespace hud {
-static bool enabled = true;                  // --classic-hud turns the whole thing off
+static bool enabled = false;                 // --hotbar / --no-hotbar turn the composed layout on; by default the game keeps its original layout (tan bar with its own hotbar)
 static bool showBar = true;                  // --hotbar shows the compact hotbar and EXP bar; by default they are hidden and the world fills the whole window (hotkeys still work). Was: --no-hotbar hides the hotbar and EXP bar (the keys / clicks still work)
 static bool active = false;                  // set every frame by the game loop: true only while the composed layout applies
 static const int NAT_W = 384, NAT_H = 256, TEX_W = 512;      // the game's framebuffer and the texture it is copied into

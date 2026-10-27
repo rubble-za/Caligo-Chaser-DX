@@ -46,7 +46,8 @@ static void onMemWrite(uc_engine*, uc_mem_type, uint64_t addr, int size, int64_t
 }
 #endif
 static ov::Dev g_inDev = ov::KEYBOARD;                                                  // which device was used last (see the hint strip below)
-static bool g_hideTouchUi = true;
+static bool g_hideTouchUi = true;                                                         // the game's own on-screen d-pad / buttons are drawn unless this is set (decided every frame from the last input device, see below)
+static bool g_touchUiOn = false, g_touchUiForce = false;                                 // g_touchUiOn: the last input was a click or a touch (the buttons are shown); g_touchUiForce: --touch-ui
 static bool g_noMoreGames = true;
 static int peekInt(const char* n);
 // Title-menu selection highlight (presentation only: drawn on a copy of the frame, so it never accumulates in the game's framebuffer).
@@ -412,8 +413,8 @@ static void usage() {
         "  --four-way       original 4-way movement (diagonals are on by default: two held directions alternate frame by frame)\n"
         "  --no-diag-boost  diagonals at about 0.7 of the straight-line speed instead of full speed\n"
         "  --hints <auto|off|kb|pad|mouse>   button hints at the bottom of menus (default auto: shows the input method you used last)\n"
-        "  --classic-hud    keep the original gameplay layout (tan bar along the bottom) instead of the compact centred hotbar\n"
-        "  --no-hotbar      hide the hotbar and EXP bar completely (the hotkeys and clicks still work)\n"
+        "  --classic-hud    (default) the original gameplay layout with the tan bar along the bottom\n  --hotbar         the compact centred hotbar instead (experimental, desktop only)\n"
+        "  --no-hotbar      like --hotbar, but with the hotbar and EXP bar hidden completely (the hotkeys and clicks still work)\n"
         "  --square-pixels  gameplay world with square pixels (a little taller than the game's original proportions)\n"
         "  --soft           use the software renderer instead of the GPU (OpenGL) renderer\n"
         "  --no-strip-fix   turn off the repair of stray effect pixels left above the hotbar\n"
@@ -446,20 +447,20 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
         else if (a == "--dump-every") dumpEvery = atoi(next().c_str()); else if (a == "--dump-dir") dumpDir = next();
         else if (a == "--run-seconds") runSeconds = atof(next().c_str()); else if (a == "--inject") inject = next();
         else if (a == "--res") { int w = 0, h = 0; if (sscanf(next().c_str(), "%dx%d", &w, &h) == 2 && w >= 800 && h >= 480) gl::rs = std::min(w / 800.f, h / 480.f); }
-        else if (a == "--touch-ui") g_hideTouchUi = false; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
+        else if (a == "--touch-ui") g_touchUiForce = true; else if (a == "--online") g_noOnline = false; else if (a == "--more-games") g_noMoreGames = false; else if (a == "--aim-follow") g_aimFollow = true; else if (a == "--no-aim-steer") g_aimSteer = false; else if (a == "--double-tap-dash") g_allowDoubleTapDash = true;
         else if (a == "--filter") { gl::forceNearest = next() != "smooth"; }
-        else if (a == "--classic-hud") hud::enabled = false; else if (a == "--hotbar") hud::showBar = true; else if (a == "--no-hotbar") hud::showBar = false; else if (a == "--square-pixels") hud::SY = hud::K; else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--fast-present") gl::g_fastQuad = true; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
+        else if (a == "--classic-hud") hud::enabled = false; else if (a == "--hotbar") { hud::enabled = true; hud::showBar = true; } else if (a == "--no-hotbar") { hud::enabled = true; hud::showBar = false; } else if (a == "--square-pixels") hud::SY = hud::K; else if (a == "--four-way") g_eightWay = false; else if (a == "--no-diag-boost") g_diagBoost = false; else if (a == "--fps") { std::string v = next(); fpsCap = v == "auto" ? -1 : std::max(0, atoi(v.c_str())); } else if (a == "--no-strip-fix") g_stripFix = false; else if (a == "--fast-present") gl::g_fastQuad = true; else if (a == "--soft") softFlag = true; else if (a == "--gpu") gpuFlag = true;
         else if (a == "--hints") { std::string v = next(); g_hintsMode = v == "off" ? -2 : v == "kb" ? ov::KEYBOARD : v == "pad" ? ov::CONTROLLER : v == "mouse" ? ov::MOUSE : -1; }      // --gpu only matters for --headless (tests default to software)
         else if (a == "--trace-files") g_traceFiles = true;
         else if (a == "--trace") g_trace = true; else { usage(); return a == "--help" ? 0 : 1; }
     }
 #ifdef __ANDROID__
     {   // Android: everything lives in the app's own folder (Android/data/<package>/files), which the user can fill with a file manager or adb: the APK plus the Com2uS folder; saves go next to them
-        g_hideTouchUi = false; hud::enabled = false; g_hintsMode = -2; fullscreen = true; gl::g_fastQuad = true; gl::rs = 1.f;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
+        g_touchUiOn = true; g_hintsMode = -2; fullscreen = true; gl::g_fastQuad = true; gl::rs = 1.f;      // phone: show the game's own on-screen d-pad and buttons, keep its original layout (they sit in the bar along the bottom), no controller button hints
         const char* ext = SDL_AndroidGetExternalStoragePath(); const char* inr = SDL_AndroidGetInternalStoragePath(); std::string base = ext ? ext : "/sdcard";
         { std::error_code e0; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e0)) base = inr; }          // files copied in with adb (or a file manager that cannot write into Android/data) live in the private folder instead
         { std::error_code e1; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e1)) extractBundledAssets(base); }          // a bundled test build: unpack the game files it carries (first launch only)
-        { std::error_code e3; if (std::filesystem::exists(base + "/force_pad", e3)) g_inDev = ov::CONTROLLER; }          // dev: a file called force_pad in the game folder starts in controller mode (for testing without a controller)
+        { std::error_code e3; if (std::filesystem::exists(base + "/force_pad", e3)) { g_inDev = ov::CONTROLLER; g_touchUiOn = false; } }          // dev: a file called force_pad in the game folder starts in controller mode (for testing without a controller)
         if (g_dataRoot == ".") g_dataRoot = base; if (g_saveRoot == "save") g_saveRoot = base + "/save";
         if (apk.empty()) { std::error_code ec; for (auto& e : std::filesystem::directory_iterator(base, ec)) if (e.path().extension() == ".apk") { apk = e.path().string(); break; } }
         std::error_code ec2; if (apk.empty() || !std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr", ec2)) { SDL_Log("base=%s apk=%s ec=%s", base.c_str(), apk.c_str(), ec2.message().c_str()); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Caligo Chaser", ("Copy your APK and the Com2uS folder into:\n" + base).c_str(), nullptr); return 1; }
@@ -479,8 +480,8 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
     Uint32 initFlags = SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER;
     bool wantHw = !softFlag && ((!hl && runSeconds <= 0) || gpuFlag);
     if (hl || runSeconds > 0) { if (!wantHw) SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy"); SDL_SetHint(SDL_HINT_AUDIODRIVER, "dummy"); }   // self-test modes never open a real window (except --gpu)
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");                                             // touches arrive as finger events (one finger = the left button), not as SDL's own fake mouse events
 #ifdef __ANDROID__
-    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");                        // landscape only (the manifest says the same)
 #endif
     if (SDL_Init(initFlags) != 0) { fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError()); return 1; }
@@ -616,7 +617,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
         g_padStyle = (ty == SDL_CONTROLLER_TYPE_PS3 || ty == SDL_CONTROLLER_TYPE_PS4 || ty == SDL_CONTROLLER_TYPE_PS5) ? ov::PLAYSTATION
                    : (ty == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO || ty == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR) ? ov::SWITCH : ov::XBOX;
         fprintf(stderr, "controller: %s\n", SDL_GameControllerName(pad)); break; } } };
-    SDL_GameControllerEventState(SDL_ENABLE); openPad(); if (pad) g_inDev = ov::CONTROLLER;
+    SDL_GameControllerEventState(SDL_ENABLE); openPad(); if (pad) { g_inDev = ov::CONTROLLER; g_touchUiOn = false; }
     auto releaseAllInput = [&](int64_t t) {
         if (g_touch.down) { g_touch.down = false; touchEvent(1, g_touch.x, g_touch.y, t); }
         inputReleaseAll(); lb = false; for (int& d : dpadSent) d = -1; stickDir = -1; stickV = -1;
@@ -648,11 +649,11 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
             case SDL_CONTROLLERDEVICEADDED: openPad(); break;
             case SDL_CONTROLLERDEVICEREMOVED: if (pad && e.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad))) { releaseAllInput(now); SDL_GameControllerClose(pad); pad = nullptr; openPad(); } break;
             case SDL_CONTROLLERBUTTONDOWN: case SDL_CONTROLLERBUTTONUP: {
-                if (e.type == SDL_CONTROLLERBUTTONDOWN) g_inDev = ov::CONTROLLER;
+                if (e.type == SDL_CONTROLLERBUTTONDOWN) { g_inDev = ov::CONTROLLER; g_touchUiOn = false; }
                 padButton(e.cbutton.button, e.type == SDL_CONTROLLERBUTTONDOWN);
                 break; }
             case SDL_CONTROLLERAXISMOTION: {
-                if (abs((int)e.caxis.value) > 16000) g_inDev = ov::CONTROLLER;                  // a real push, not stick drift
+                if (abs((int)e.caxis.value) > 16000) { g_inDev = ov::CONTROLLER; g_touchUiOn = false; }                  // a real push, not stick drift
                 if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {   // LT / RT = dash
                     int tl = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT), tr = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
                     static bool trig = false; bool want = std::max(tl, tr) > (trig ? 8000 : 16000);
@@ -664,7 +665,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
             case SDL_KEYDOWN: case SDL_KEYUP: {
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F11) { Uint32 f = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP; SDL_SetWindowFullscreen(win, f ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP); break; }
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F12) { char b[64]; snprintf(b, sizeof b, "screenshot_%03d.png", shot++); savePng(b); fprintf(stderr, "saved %s\n", b); break; }
-                if (e.type == SDL_KEYDOWN) g_inDev = ov::KEYBOARD;
+                if (e.type == SDL_KEYDOWN) { g_inDev = ov::KEYBOARD; g_touchUiOn = false; }
                 if (e.key.repeat) break;
                 if (e.key.keysym.scancode == SDL_SCANCODE_LSHIFT || e.key.keysym.scancode == SDL_SCANCODE_RSHIFT) { dashPress(e.type == SDL_KEYDOWN); break; }   // Shift = dash
                 int gk = gameKeyFromSdl(e.key.keysym.scancode); if (gk == -1) gk = gameKeyFromAndroid(androidKeyFromSdl(e.key.keysym.scancode));
@@ -685,7 +686,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
                 int wx = e.type == SDL_MOUSEMOTION ? e.motion.x : e.button.x, wy = e.type == SDL_MOUSEMOTION ? e.motion.y : e.button.y;
                 float lx, ly; if (gl::hw::on) gl::hw::windowToLogical(wx, wy, lx, ly); else SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly); lx /= gl::rs; ly /= gl::rs;
                 if (hud::enabled && hud::active) hud::unmapTouch(lx, ly);                // the gameplay HUD is re-laid-out: translate back to where the game expects things
-                if (e.type == SDL_MOUSEBUTTONDOWN) { g_touch.down = true; SDL_CaptureMouse(SDL_TRUE); touchEvent(0, lx, ly, now); }
+                if (e.type == SDL_MOUSEBUTTONDOWN) { g_touchUiOn = true; g_touch.down = true; SDL_CaptureMouse(SDL_TRUE); touchEvent(0, lx, ly, now); }
                 else if (e.type == SDL_MOUSEBUTTONUP) { SDL_CaptureMouse(SDL_FALSE); if (g_touch.down) { g_touch.down = false; touchEvent(1, lx, ly, now); } }
                 else if (g_touch.down) touchEvent(2, lx, ly, now);
                 break; }
@@ -696,7 +697,11 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
             Uint64 pc0 = SDL_GetPerformanceCounter(); double dr0 = gl::drawSeconds;
 #endif
 #ifdef __ANDROID__
-            { bool padOn = g_inDev == ov::CONTROLLER; g_hideTouchUi = padOn; g_hintsMode = padOn ? -1 : -2; }      // a controller in use: the same original layout (its own hotbar) without the on-screen buttons, plus the button hints; touch: the on-screen buttons. (hud::enabled stays off on a phone, so the screen never changes layout.)
+            g_hintsMode = g_inDev == ov::CONTROLLER ? -1 : -2;                                      // a phone shows button hints only for a controller
+#endif
+            g_hideTouchUi = !(g_touchUiOn || g_touchUiForce);                                       // a click or a touch brings the on-screen buttons back, a key or a controller hides them (the layout itself never changes)
+#ifdef __ANDROID__
+            {}
 #endif
             inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();
 #ifdef __ANDROID__

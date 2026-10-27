@@ -45,6 +45,7 @@ static void onMemWrite(uc_engine*, uc_mem_type, uint64_t addr, int size, int64_t
     fprintf(stderr, "WR %08x sz=%d val=%lld pc=lib+%x\n", a, size, (long long)value, reg(PC) - LIB_BASE);
 }
 #endif
+static ov::Dev g_inDev = ov::KEYBOARD;                                                  // which device was used last (see the hint strip below)
 static bool g_hideTouchUi = true;
 static bool g_noMoreGames = true;
 static int peekInt(const char* n);
@@ -61,7 +62,7 @@ static void profileReport() {
 static bool titleMenuShown() { return peekInt("nState") == 4 && peekInt("g_nTitleToMainFra") >= 10; }
 static int titleHighlightIndex() {
 #ifdef __ANDROID__
-    return -1;                                                                  // touch only: no controller/keyboard selection box
+    if (g_inDev != ov::CONTROLLER) return -1;                                   // touch: no selection box; with a controller it shows like on the PC
 #endif
     if (!titleMenuShown()) return -1; int i = peekInt("g_nMenuIndex"); return i >= 0 && i <= 2 ? i : -1; }
 // Composed gameplay HUD in software (also used for screenshots): the same picture hw::present draws with OpenGL, built from the CPU copy of the game's texture. See hud.inc.
@@ -100,6 +101,53 @@ static bool composeSoft(std::vector<uint32_t>& dst) {
         }
     }
     return true;
+}// The same composed gameplay layout, title highlight and button hints as the GPU path in gl_hw.inc, but drawn with SDL's renderer from the game's 512x256 picture texture (used on Android).
+static std::map<const ov::Bitmap*, SDL_Texture*> g_hintTex;
+static void composeSdl(SDL_Renderer* ren, SDL_Texture* texq, const gl::Tex& gt, bool comp, const ov::Bitmap* hintBm, int hlIdx) {
+    const float rs = (float)gl::rs, K = hud::K, SY = hud::SY;
+    auto F = [&](float x, float y, float w, float h) { SDL_FRect r{x * rs, y * rs, w * rs, h * rs}; return r; };
+    auto cp = [&](int sx, int sy, int sw, int sh, SDL_FRect d) { SDL_Rect s{sx, sy, sw, sh}; SDL_RenderCopyF(ren, texq, &s, &d); };
+    auto fill = [&](float x, float y, float w, float h, uint32_t c, int a) { SDL_SetRenderDrawColor(ren, c & 255, c >> 8 & 255, c >> 16 & 255, a); SDL_FRect d = F(x, y, w, h); SDL_RenderFillRectF(ren, &d); };
+    if (comp) {
+        const float split = hud::SLOT_FRAME_Y0 * SY, wBottom = hud::WORLD_ROWS * SY, xa = hud::SLOT_X0 * K, xb = (hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_FRAME_W) * K;
+        const int fa = hud::SLOT_X0, fb = hud::SLOT_X0 + (hud::SLOTS - 1) * hud::SLOT_PITCH + hud::SLOT_FRAME_W;
+        cp(0, 0, hud::NAT_W, hud::SLOT_FRAME_Y0, F(0, 0, 800, split));                                                  // the world; rows 216..219 hold the tops of the game's slot frames at the hotbar's x range, so there the clean row above is repeated
+        cp(0, hud::SLOT_FRAME_Y0, fa, hud::WORLD_ROWS - hud::SLOT_FRAME_Y0, F(0, split, xa, wBottom - split));
+        cp(fa, hud::SLOT_FRAME_Y0 - 1, fb - fa, 1, F(xa, split, xb - xa, wBottom - split));
+        cp(fb, hud::SLOT_FRAME_Y0, hud::NAT_W - fb, hud::WORLD_ROWS - hud::SLOT_FRAME_Y0, F(xb, split, 800 - xb, wBottom - split));
+        if (hud::showBar) {
+            uint32_t ar = 0, ag = 0, ab = 0; for (int x = 0; x < hud::NAT_W; x++) { uint32_t p = gt.px[(size_t)(hud::SLOT_FRAME_Y0 - 1) * hud::TEX_W + x]; ar += p & 255; ag += p >> 8 & 255; ab += p >> 16 & 255; }
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            for (int row = hud::FADE_R0; row < hud::NAT_H; row += hud::FADE_BAND) {                                      // the stepped fade below the world
+                float al, f; hud::fadeAt(row, al, f); uint32_t c = (uint32_t)(ar / hud::NAT_W * f) | (uint32_t)(ag / hud::NAT_W * f) << 8 | (uint32_t)(ab / hud::NAT_W * f) << 16;
+                fill(0, row * SY, 800, (std::min(hud::NAT_H, row + hud::FADE_BAND) - row) * SY, c, (int)(al * 255));
+            }
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+            for (int k = 0; k < hud::SLOTS; k++) {                                                                      // live slot interiors cut from the game's own frame
+                float gx = (float)(k * (hud::SL + hud::GAP) + hud::BORDER); int sx = hud::SLOT_X0 + k * hud::SLOT_PITCH + hud::INT_REL_X;
+                cp(sx, hud::INT_Y0, hud::INT, hud::INT, F(hud::groupX(gx), hud::groupY((float)hud::BORDER), hud::INT * K, hud::INT * K)); }
+            cp(hud::LAB_X0, hud::LAB_Y0, hud::LAB_W, hud::LAB_H, F(hud::groupX(0), hud::groupY((float)hud::EXP_Y), hud::LAB_W * K, hud::LAB_H * K));
+            cp(hud::BAR_X0, hud::BAR_Y0, hud::BAR_X1 - hud::BAR_X0, hud::BAR_Y1 - hud::BAR_Y0, F(hud::groupX((float)hud::BAR_DX), hud::groupY((float)(hud::EXP_Y + hud::BAR_DY)), (hud::GW - hud::BAR_DX) * K, (hud::BAR_Y1 - hud::BAR_Y0) * K));
+            auto sq = [&](uint32_t c, float gx0, float gy0, float gx1, float gy1) { fill(hud::groupX(gx0), hud::groupY(gy0), hud::groupX(gx1) - hud::groupX(gx0), hud::groupY(gy1) - hud::groupY(gy0), c, 255); };
+            for (int pass = 0; pass < 2; pass++) { uint32_t c = pass ? hud::RING_GOLD : hud::RING_OUTER;                  // the thin two-tone slot borders
+                for (int k = 0; k < hud::SLOTS; k++) { float o = (float)(k * (hud::SL + hud::GAP)), e = (float)hud::SL, i0 = pass ? 1.f : 0.f;
+                    sq(c, o + i0 + (pass ? 0 : 1), i0, o + e - i0 - (pass ? 0 : 1), i0 + 1);
+                    sq(c, o + i0 + (pass ? 0 : 1), e - i0 - 1, o + e - i0 - (pass ? 0 : 1), e - i0);
+                    sq(c, o + i0, i0 + 1, o + i0 + 1, e - i0 - 1);
+                    sq(c, o + e - i0 - 1, i0 + 1, o + e - i0, e - i0 - 1); } }
+        }
+    } else { SDL_Rect s{0, 0, 384, 256}; SDL_RenderCopy(ren, texq, &s, nullptr); }
+    if (hlIdx >= 0 && hlIdx <= 2) {                                                                                       // title menu selection box
+        static const int cy[3] = {220, 296, 368}; const float x0 = 480, y0 = (float)(cy[hlIdx] - 27), w = 300, h = 54, bw = 2;
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND); fill(x0, y0, w, h, 0xffffc86e, 110);
+        fill(x0, y0, w, bw, 0xffffc86e, 255); fill(x0, y0 + h - bw, w, bw, 0xffffc86e, 255); fill(x0, y0, bw, h, 0xffffc86e, 255); fill(x0 + w - bw, y0, bw, h, 0xffffc86e, 255);
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+    }
+    if (hintBm && hintBm->w > 0) {                                                                                        // button hints
+        SDL_Texture*& ht = g_hintTex[hintBm];
+        if (!ht) { ht = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, hintBm->w, hintBm->h); SDL_UpdateTexture(ht, nullptr, hintBm->px.data(), hintBm->w * 4); SDL_SetTextureBlendMode(ht, SDL_BLENDMODE_BLEND); }
+        SDL_Rect d{hintBm->x0, hintBm->y0, hintBm->w, hintBm->h}; SDL_RenderCopy(ren, ht, nullptr, &d);
+    }
 }static const std::vector<uint32_t>& presentFb() {
     gl::ensureFb(); gl::flushQuad();
     int idx = titleHighlightIndex(); bool hl = idx >= 0, comp = hud::enabled && hud::active;
@@ -128,7 +176,7 @@ static bool composeSoft(std::vector<uint32_t>& dst) {
     return g_presentTmp;
 }
 // Input tracking for the hint strip: which device was used last, and what style of face buttons the controller has.
-static ov::Dev g_inDev = ov::KEYBOARD; static ov::Pad g_padStyle = ov::XBOX; static int g_hintsMode = -1;      // g_hintsMode: -1 automatic, -2 off, otherwise a forced ov::Dev
+static ov::Pad g_padStyle = ov::XBOX; static int g_hintsMode = -1;      // g_hintsMode: -1 automatic, -2 off, otherwise a forced ov::Dev
 static ov::Ctx hintCtx() {                                                       // which menu is showing (game state values found by watching the game)
     int st = peekInt("nState");
     if (st == 4) return titleMenuShown() ? ov::TITLE : ov::NONE; if (st == 6) return ov::SLOTS; if (st == 13) return ov::MENU;
@@ -158,9 +206,9 @@ static void bootHost(const std::vector<uint8_t>& lib) {
 #endif
     uint32_t ninit = loadLibMem(lib);
     for (uint32_t i = 0; i < ninit; i++) callGuest(g_exports["__init_" + std::to_string(i)]);
-    if (g_hideTouchUi) {                                          // desktop: skip the on-screen d-pad / action-button overlay (DrawViewGameVirtualKey)
+    {                                                              // the on-screen d-pad / action-button overlay (DrawViewGameVirtualKey): hidden while g_hideTouchUi (desktop; on a phone only while a controller is in use)
         auto it = g_exports.find("DrawViewGameVirtualKey");
-        if (it != g_exports.end()) cpuHookFunction(it->second, [] { return true; });                 // return immediately
+        if (it != g_exports.end()) cpuHookFunction(it->second, [] { return g_hideTouchUi; });
     }
     if (g_noMoreGames) {                                           // title menu: drop the "More Games" entry (its image is id 0x952)
         auto it = g_exports.find("DrawManagerImage");
@@ -408,6 +456,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
         const char* ext = SDL_AndroidGetExternalStoragePath(); const char* inr = SDL_AndroidGetInternalStoragePath(); std::string base = ext ? ext : "/sdcard";
         { std::error_code e0; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e0)) base = inr; }          // files copied in with adb (or a file manager that cannot write into Android/data) live in the private folder instead
         { std::error_code e1; if (inr && !std::filesystem::exists(base + "/Com2uS/com.com2us.caligo/resources.csr", e1)) extractBundledAssets(base); }          // a bundled test build: unpack the game files it carries (first launch only)
+        { std::error_code e3; if (std::filesystem::exists(base + "/force_pad", e3)) g_inDev = ov::CONTROLLER; }          // dev: a file called force_pad in the game folder starts in controller mode (for testing without a controller)
         if (g_dataRoot == ".") g_dataRoot = base; if (g_saveRoot == "save") g_saveRoot = base + "/save";
         if (apk.empty()) { std::error_code ec; for (auto& e : std::filesystem::directory_iterator(base, ec)) if (e.path().extension() == ".apk") { apk = e.path().string(); break; } }
         std::error_code ec2; if (apk.empty() || !std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr", ec2)) { SDL_Log("base=%s apk=%s ec=%s", base.c_str(), apk.c_str(), ec2.message().c_str()); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Caligo Chaser", ("Copy your APK and the Com2uS folder into:\n" + base).c_str(), nullptr); return 1; }
@@ -643,6 +692,9 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
 #ifdef __ANDROID__
             Uint64 pc0 = SDL_GetPerformanceCounter(); double dr0 = gl::drawSeconds;
 #endif
+#ifdef __ANDROID__
+            { bool padOn = g_inDev == ov::CONTROLLER; hud::enabled = padOn; g_hideTouchUi = padOn; g_hintsMode = padOn ? -1 : -2; }      // a controller in use: the PC layout (centred hotbar, button hints, no on-screen buttons); touch: the original layout with the on-screen buttons
+#endif
             inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();
 #ifdef __ANDROID__
             Uint64 pc1 = SDL_GetPerformanceCounter();
@@ -654,7 +706,10 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
                 if (qt != gl::texs.end() && !qt->second.px.empty()) {                  // the frame is just the game's picture: scale its texture on the GPU, no CPU drawing
                     const gl::PendingQuad& q = gl::g_quad; SDL_UpdateTexture(texq, nullptr, qt->second.px.data(), 512 * 4);
                     SDL_Rect src{(int)lroundf(std::min(q.u0, q.u1) * 512), (int)lroundf(std::min(q.v0, q.v1) * 256), 0, 0}; src.w = (int)lroundf(std::max(q.u0, q.u1) * 512) - src.x; src.h = (int)lroundf(std::max(q.v0, q.v1) * 256) - src.y;
-                    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255); SDL_RenderClear(ren); SDL_RenderCopyEx(ren, texq, &src, nullptr, 0, nullptr, (SDL_RendererFlip)((q.u0 > q.u1 ? SDL_FLIP_HORIZONTAL : 0) | (q.v0 > q.v1 ? SDL_FLIP_VERTICAL : 0)));
+                    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255); SDL_RenderClear(ren);
+                    bool plain = !(hud::enabled && hud::active) && titleHighlightIndex() < 0 && !(g_hintBm && g_hintBm->w > 0);
+                    if (plain) SDL_RenderCopyEx(ren, texq, &src, nullptr, 0, nullptr, (SDL_RendererFlip)((q.u0 > q.u1 ? SDL_FLIP_HORIZONTAL : 0) | (q.v0 > q.v1 ? SDL_FLIP_VERTICAL : 0)));
+                    else composeSdl(ren, texq, qt->second, hud::enabled && hud::active, g_hintBm, titleHighlightIndex());
                 } else {
                 SDL_UpdateTexture(tex, nullptr, presentFb().data(), gl::fbW * 4);
                 SDL_SetRenderDrawColor(ren, 0, 0, 0, 255); SDL_RenderClear(ren); SDL_RenderCopy(ren, tex, nullptr, nullptr);

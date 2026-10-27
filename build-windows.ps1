@@ -3,7 +3,7 @@
 # Usage:  powershell -ExecutionPolicy Bypass -File build-windows.ps1
 # Output: build-win\CaligoChaser.exe
 # Optional: -IconFromApk "<your Caligo Chaser APK>" gives the exe the game's own icon (Com2uS artwork taken from your APK at build time; it is not part of this repository).
-param([string]$IconFromApk = '')
+param([string]$IconFromApk = '', [switch]$OriginalIcon)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -81,14 +81,14 @@ Run cmake --build "$T\SDL2-2.30.9\build-win"
 # The exe's icon: build an .ico from the launcher icon inside the user's APK and compile it into a resource object.
 $resObj = @()
 if ($IconFromApk -and (Test-Path $IconFromApk)) {
-    Add-Type -AssemblyName System.IO.Compression.FileSystem; Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.IO.Compression.FileSystem; Add-Type -AssemblyName System.Drawing; . "$PSScriptRoot\tools\icon-tint.ps1"
     $z = [IO.Compression.ZipFile]::OpenRead($IconFromApk)
     try {
         $e = $z.GetEntry('res/drawable-hdpi/icon.png')
         if ($e) {
             $ms0 = New-Object IO.MemoryStream; $es = $e.Open(); $es.CopyTo($ms0); $es.Close(); $src = [Drawing.Image]::FromStream($ms0)
             $sizes = 16, 32, 48, 64, 128, 256; $imgs = @()
-            foreach ($s in $sizes) { $bmp = New-Object Drawing.Bitmap $s, $s; $g = [Drawing.Graphics]::FromImage($bmp); $g.InterpolationMode = 'HighQualityBicubic'; $g.PixelOffsetMode = 'HighQuality'; $g.DrawImage($src, 0, 0, $s, $s); $g.Dispose()
+            foreach ($s in $sizes) { $bmp = New-Object Drawing.Bitmap $s, $s; $g = [Drawing.Graphics]::FromImage($bmp); $g.InterpolationMode = 'HighQualityBicubic'; $g.PixelOffsetMode = 'HighQuality'; $g.DrawImage($src, 0, 0, $s, $s); $g.Dispose(); if (-not $OriginalIcon) { Convert-IconTeal $bmp }
                 $ms = New-Object IO.MemoryStream; $bmp.Save($ms, [Drawing.Imaging.ImageFormat]::Png); $imgs += , $ms.ToArray(); $bmp.Dispose() }
             $fs = [IO.File]::Create("$PSScriptRoot\build-win\app.ico"); $bw = New-Object IO.BinaryWriter $fs
             $bw.Write([uint16]0); $bw.Write([uint16]1); $bw.Write([uint16]$sizes.Count); $off = 6 + 16 * $sizes.Count

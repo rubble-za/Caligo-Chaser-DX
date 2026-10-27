@@ -426,10 +426,21 @@ static void usage() {
         "Testing: --headless <frames> [--script \"400:tap:400:240;...\"] [--dump-every N --dump-dir D] [--trace]\n");
 }
 
+// "Are you sure you want to exit?" (Android Back on the title menu)
+static bool confirmExit() {
+    const SDL_MessageBoxButtonData btns[] = {{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel"}, {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Exit"}};
+    SDL_MessageBoxData d{SDL_MESSAGEBOX_INFORMATION, nullptr, "Caligo Chaser", "Are you sure you want to exit?", 2, btns, nullptr}; int id = 1;
+    return SDL_ShowMessageBox(&d, &id) < 0 || id == 1;                                      // (if the dialog cannot be shown, leave rather than trap the player)
+}
 // The window / taskbar icon: the game's own launcher icon, read from the user's APK at run time (nothing is stored).
 static void setWindowIconFromApk(SDL_Window* w) {
     std::vector<uint8_t> png; if (!w || !apkRead("res/drawable-hdpi/icon.png", png)) return;
     int iw = 0, ih = 0, n = 0; unsigned char* px = stbi_load_from_memory(png.data(), (int)png.size(), &iw, &ih, &n, 4); if (!px) return;
+    {   // re-shade it to aqua / turquoise / green (a gradient map on the brightness; the same map tools/icon-tint.ps1 applies to the exe and the Android icon)
+        static const float st[4][4] = {{0.f, 2, 24, 32}, {0.45f, 18, 160, 150}, {0.8f, 110, 235, 210}, {1.f, 225, 255, 245}};
+        for (int i = 0; i < iw * ih; i++) { unsigned char* c = px + 4 * i; float l = (0.299f * c[0] + 0.587f * c[1] + 0.114f * c[2]) / 255.f; int k = 1; while (k < 3 && l > st[k][0]) k++;
+            float u = std::min(1.f, std::max(0.f, (l - st[k - 1][0]) / (st[k][0] - st[k - 1][0]))); for (int j = 0; j < 3; j++) c[j] = (unsigned char)(st[k - 1][1 + j] + (st[k][1 + j] - st[k - 1][1 + j]) * u); }
+    }
     if (SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(px, iw, ih, 32, iw * 4, SDL_PIXELFORMAT_RGBA32)) { SDL_SetWindowIcon(w, s); SDL_FreeSurface(s); }
     stbi_image_free(px);
 }
@@ -677,7 +688,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
             case SDL_KEYDOWN: case SDL_KEYUP: {
                 if (e.key.keysym.scancode == SDL_SCANCODE_AC_BACK) {                                        // Android's Back button / gesture: like the controller's B (game key 73); on the title menu it leaves the game
                     if (e.key.repeat) break;
-                    if (e.type == SDL_KEYDOWN && titleMenuShown()) { g_wantQuit = true; break; }
+                    if (e.type == SDL_KEYDOWN && titleMenuShown()) { if (confirmExit()) g_wantQuit = true; break; }
                     inputKey(73, e.type == SDL_KEYDOWN); break; }
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F11) { Uint32 f = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP; SDL_SetWindowFullscreen(win, f ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP); break; }
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F12) { char b[64]; snprintf(b, sizeof b, "screenshot_%03d.png", shot++); savePng(b); fprintf(stderr, "saved %s\n", b); break; }

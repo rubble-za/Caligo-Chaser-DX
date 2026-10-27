@@ -31,7 +31,7 @@ See `README.txt` for the full controls and options.
 ## Building
 
 Windows (native, needs only Git for Windows): `powershell -ExecutionPolicy Bypass -File build-windows.ps1`. It downloads llvm-mingw, CMake, Ninja, dynarmic, the Boost headers and the libraries into `third_party\` and writes `build-win\CaligoChaser.exe`.
-Android (arm64, phones with Android 7+): see `android/` - `android\build-android.ps1` builds a debug APK (needs the JDK 17, Android SDK + NDK 26, Gradle). The app asks for your own game APK and Com2uS folder on first launch; `android\build-bundled.ps1` can build a private test APK that carries them (never share that one).
+Android (arm64, phones with Android 7+): see `android/` - `android\build-android.ps1` builds a debug APK (needs the JDK 17, Android SDK + NDK 26, Gradle). The app asks for your own game APK and Com2uS folder on first launch; `android\build-android.ps1 -IconFromApk "<your APK>"` gives the app the original game's launcher icon (otherwise it uses a neutral built-in one); `android\build-bundled.ps1` can build a private test APK that carries them (never share that one).
 Linux: `./build-linux.sh` (needs g++, cmake, ninja, git; fetches Unicorn, SDL2, miniz and stb; uses the Unicorn CPU backend, `-DCC_UNICORN`).
 Windows (cross-compiled from Linux with llvm-mingw): `./build-windows-from-linux.sh`.
 

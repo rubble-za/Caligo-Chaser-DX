@@ -696,7 +696,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
             Uint64 pc0 = SDL_GetPerformanceCounter(); double dr0 = gl::drawSeconds;
 #endif
 #ifdef __ANDROID__
-            { bool padOn = g_inDev == ov::CONTROLLER; hud::enabled = padOn; g_hideTouchUi = padOn; g_hintsMode = padOn ? -1 : -2; }      // a controller in use: the PC layout (centred hotbar, button hints, no on-screen buttons); touch: the original layout with the on-screen buttons
+            { bool padOn = g_inDev == ov::CONTROLLER; g_hideTouchUi = padOn; g_hintsMode = padOn ? -1 : -2; }      // a controller in use: the same original layout (its own hotbar) without the on-screen buttons, plus the button hints; touch: the on-screen buttons. (hud::enabled stays off on a phone, so the screen never changes layout.)
 #endif
             inputTick(); gameFrame(now); frameCount++; if (g_debugState) inGameplay();
 #ifdef __ANDROID__

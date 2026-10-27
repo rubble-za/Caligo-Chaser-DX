@@ -196,6 +196,8 @@ static ov::Ctx hintCtx() {                                                      
     return ov::NONE;
 }
 static const ov::Bitmap* currentHints() {
+    ov::Dev dev = g_hintsMode >= 0 ? (ov::Dev)g_hintsMode : g_inDev;
+    if (titleMenuShown()) return ov::getTitle(dev, g_padStyle, gl::fbW, gl::fbH, g_hintsMode != -2);       // the DX badge (and the hints, if on)
     if (g_hintsMode == -2) return nullptr;
     return ov::get(hintCtx(), g_hintsMode >= 0 ? (ov::Dev)g_hintsMode : g_inDev, g_padStyle, gl::fbW, gl::fbH);
 }

@@ -154,4 +154,32 @@ static const Bitmap* get(Ctx ctx, Dev dev, Pad pad, int fbW, int fbH) {
     }
     return &bm;
 }
-}  // namespace ov
+
+// The "DX" badge on the title menu (Caligo Chaser DX): a dark plate with a gold border and pixel-font letters, same look as the icon's badge. It sits under the game's logo, in the empty area right of the
+// logo's lower wing (about x 696..772, y 150..188 of the 800x480 layout). It is delivered through the same single overlay bitmap as the button hints (one bitmap covers both), so every presenter shows it.
+static void roundedRect(Bitmap& b, int x, int y, int w, int h, int r, uint32_t c) {
+    for (int yy = 0; yy < h; yy++) for (int xx = 0; xx < w; xx++) {
+        float cx = xx < r ? r - xx - .5f : xx >= w - r ? xx - (w - r) + .5f : 0.f, cy = yy < r ? r - yy - .5f : yy >= h - r ? yy - (h - r) + .5f : 0.f;
+        if (cx * cx + cy * cy > (float)r * r) continue; int px = x + xx, py = y + yy; if (px >= 0 && px < b.w && py >= 0 && py < b.h) b.px[(size_t)py * b.w + px] = c; }
+}
+static void drawDxBadge(Bitmap& b, int ox, int oy, float s0) {
+    int w = (int)lroundf(76 * s0), h = (int)lroundf(38 * s0), t = std::max(1, (int)lroundf(2 * s0)), cell = std::max(1, (int)lroundf(4 * s0)), r = std::max(2, (int)lroundf(6 * s0));
+    const uint32_t GOLD = 0xff46b8f0, PLATE = 0xff221006, INK = 0xffb0eeff;                      // ABGR: gold (240,184,70), dark navy (6,16,34), pale gold (255,238,176)
+    roundedRect(b, ox, oy, w, h, r, GOLD); roundedRect(b, ox + t, oy + t, w - 2 * t, h - 2 * t, std::max(1, r - t), PLATE);
+    static const unsigned char GD[7] = {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}, GX[7] = {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11};
+    int tx = ox + (w - 11 * cell) / 2, ty = oy + (h - 7 * cell) / 2;
+    for (int row = 0; row < 7; row++) for (int col = 0; col < 5; col++) for (int g = 0; g < 2; g++) if (((g ? GX : GD)[row] >> (4 - col)) & 1)
+        for (int dy = 0; dy < cell; dy++) for (int dx = 0; dx < cell; dx++) { int px = tx + (g * 6 + col) * cell + dx, py = ty + row * cell + dy; if (px >= 0 && px < b.w && py >= 0 && py < b.h) b.px[(size_t)py * b.w + px] = INK; }
+}
+// Title menu overlay: the DX badge, plus the button-hint pill when hints are on, in one bitmap that covers both.
+static const Bitmap* getTitle(Dev dev, Pad pad, int fbW, int fbH, bool hintsOn) {
+    static Bitmap tb; const Bitmap* pill = hintsOn ? get(TITLE, dev, pad, fbW, fbH) : nullptr;
+    float s0 = fbW / 800.f; int bx = (int)lroundf(696 * s0), by = (int)lroundf(150 * s0), bw = (int)lroundf(76 * s0), bh = (int)lroundf(38 * s0);
+    int x0 = bx, y0 = by, x1 = bx + bw, y1 = by + bh; if (pill) { x0 = std::min(x0, pill->x0); y0 = std::min(y0, pill->y0); x1 = std::max(x1, pill->x0 + pill->w); y1 = std::max(y1, pill->y0 + pill->h); }
+    int key = (pill ? pill->key : 0x1234) | (1 << 30);
+    if (tb.key == key && tb.x0 == x0 && tb.y0 == y0 && tb.w == x1 - x0 && tb.h == y1 - y0) return &tb;
+    tb.key = key; tb.x0 = x0; tb.y0 = y0; tb.w = x1 - x0; tb.h = y1 - y0; tb.px.assign((size_t)tb.w * tb.h, 0);
+    if (pill) for (int y = 0; y < pill->h; y++) for (int x = 0; x < pill->w; x++) tb.px[(size_t)(pill->y0 - y0 + y) * tb.w + (pill->x0 - x0 + x)] = pill->px[(size_t)y * pill->w + x];
+    drawDxBadge(tb, bx - x0, by - y0, s0);
+    return &tb;
+}}  // namespace ov

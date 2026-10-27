@@ -1,7 +1,9 @@
-# Builds CaligoChaser.exe natively on Windows (x86-64). No admin rights or installed compiler needed except Git for Windows:
+﻿# Builds CaligoChaser.exe natively on Windows (x86-64). No admin rights or installed compiler needed except Git for Windows:
 # everything is downloaded into third_party\ (llvm-mingw, CMake, Ninja, dynarmic, Boost headers, SDL2 2.30.9, miniz 3.0.2, stb).
 # Usage:  powershell -ExecutionPolicy Bypass -File build-windows.ps1
 # Output: build-win\CaligoChaser.exe
+# Optional: -IconFromApk "<your Caligo Chaser APK>" gives the exe the game's own icon (Com2uS artwork taken from your APK at build time; it is not part of this repository).
+param([string]$IconFromApk = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -76,11 +78,33 @@ Write-Host 'Building SDL2 ...'
 Run cmake -S "$T\SDL2-2.30.9" -B "$T\SDL2-2.30.9\build-win" @cmakeCommon -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF
 Run cmake --build "$T\SDL2-2.30.9\build-win"
 
-Write-Host 'Building CaligoChaser.exe ...'
+# The exe's icon: build an .ico from the launcher icon inside the user's APK and compile it into a resource object.
+$resObj = @()
+if ($IconFromApk -and (Test-Path $IconFromApk)) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem; Add-Type -AssemblyName System.Drawing
+    $z = [IO.Compression.ZipFile]::OpenRead($IconFromApk)
+    try {
+        $e = $z.GetEntry('res/drawable-hdpi/icon.png')
+        if ($e) {
+            $ms0 = New-Object IO.MemoryStream; $es = $e.Open(); $es.CopyTo($ms0); $es.Close(); $src = [Drawing.Image]::FromStream($ms0)
+            $sizes = 16, 32, 48, 64, 128, 256; $imgs = @()
+            foreach ($s in $sizes) { $bmp = New-Object Drawing.Bitmap $s, $s; $g = [Drawing.Graphics]::FromImage($bmp); $g.InterpolationMode = 'HighQualityBicubic'; $g.PixelOffsetMode = 'HighQuality'; $g.DrawImage($src, 0, 0, $s, $s); $g.Dispose()
+                $ms = New-Object IO.MemoryStream; $bmp.Save($ms, [Drawing.Imaging.ImageFormat]::Png); $imgs += , $ms.ToArray(); $bmp.Dispose() }
+            $fs = [IO.File]::Create("$PSScriptRoot\build-win\app.ico"); $bw = New-Object IO.BinaryWriter $fs
+            $bw.Write([uint16]0); $bw.Write([uint16]1); $bw.Write([uint16]$sizes.Count); $off = 6 + 16 * $sizes.Count
+            for ($i = 0; $i -lt $sizes.Count; $i++) { $d = if ($sizes[$i] -ge 256) { 0 } else { $sizes[$i] }; $bw.Write([byte]$d); $bw.Write([byte]$d); $bw.Write([byte]0); $bw.Write([byte]0); $bw.Write([uint16]1); $bw.Write([uint16]32); $bw.Write([uint32]$imgs[$i].Length); $bw.Write([uint32]$off); $off += $imgs[$i].Length }
+            foreach ($im in $imgs) { $bw.Write($im) }
+            $bw.Close(); $src.Dispose()
+            [IO.File]::WriteAllText("$PSScriptRoot\build-win\app.rc", "1 ICON `"app.ico`"`r`n")
+            Push-Location "$PSScriptRoot\build-win"; Run "$M-windres" app.rc -O coff -o app-res.o; Pop-Location
+            $resObj = @('build-win\app-res.o'); Write-Host "Using the game icon from $IconFromApk"
+        } else { Write-Host 'No launcher icon found in that APK.' }
+    } finally { $z.Dispose() }
+}Write-Host 'Building CaligoChaser.exe ...'
 Run "$M-clang" -O2 -c "$T\stb\stb_vorbis.c" -o build-win\stb_vorbis.o
 Run "$M-clang" -O2 -c "$T\miniz\miniz.c" -o build-win\miniz.o
 $D = "$T\dynarmic"; $DB = "$D\build-win"; $S = "$T\SDL2-2.30.9"
-Run "$M-clang++" -std=c++20 -O3 -Wno-everything -Isrc "-I$D\src" "-I$D\externals\mcl\include" "-I$D\externals\fmt\include" "-I$T\boost-inc" "-I$T\miniz" "-I$S\include" "-I$S\include\SDL2" src\main.cpp build-win\stb_vorbis.o build-win\miniz.o -o build-win\CaligoChaser.exe `
+Run "$M-clang++" -std=c++20 -O3 -Wno-everything -Isrc "-I$D\src" "-I$D\externals\mcl\include" "-I$D\externals\fmt\include" "-I$T\boost-inc" "-I$T\miniz" "-I$T\stb" "-I$S\include" "-I$S\include\SDL2" src\main.cpp build-win\stb_vorbis.o build-win\miniz.o @resObj -o build-win\CaligoChaser.exe `
     "$S\build-win\libSDL2.a" "$DB\src\dynarmic\libdynarmic.a" "$DB\externals\mcl\src\libmcl.a" "$DB\externals\fmt\libfmt.a" "$DB\externals\zydis\libZydis.a" "$DB\externals\zydis\zycore\libZycore.a" `
     -s -static -lmingw32 -lpthread -lm -lopengl32 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -lshell32 -lcfgmgr32 -lws2_32
 Write-Host 'Built build-win\CaligoChaser.exe'

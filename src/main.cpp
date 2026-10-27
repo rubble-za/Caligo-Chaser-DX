@@ -10,6 +10,9 @@
 #include <SDL_opengl.h>
 #endif
 #include "host.cpp"
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#include <stb_image.h>
 
 extern "C" void* tdefl_write_image_to_png_file_in_memory(const void* pImage, int w, int h, int num_chans, size_t* pLen_out);
 
@@ -423,6 +426,13 @@ static void usage() {
         "Testing: --headless <frames> [--script \"400:tap:400:240;...\"] [--dump-every N --dump-dir D] [--trace]\n");
 }
 
+// The window / taskbar icon: the game's own launcher icon, read from the user's APK at run time (nothing is stored).
+static void setWindowIconFromApk(SDL_Window* w) {
+    std::vector<uint8_t> png; if (!w || !apkRead("res/drawable-hdpi/icon.png", png)) return;
+    int iw = 0, ih = 0, n = 0; unsigned char* px = stbi_load_from_memory(png.data(), (int)png.size(), &iw, &ih, &n, 4); if (!px) return;
+    if (SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(px, iw, ih, 32, iw * 4, SDL_PIXELFORMAT_RGBA32)) { SDL_SetWindowIcon(w, s); SDL_FreeSurface(s); }
+    stbi_image_free(px);
+}
 #ifdef __ANDROID__
 // A private test build can carry the user's own game files inside the app (assets/files.txt lists them, one path per line): on first launch they are unpacked into the app's private folder.
 static void extractBundledAssets(const std::string& dst) {
@@ -482,6 +492,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
     if (hl || runSeconds > 0) { if (!wantHw) SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy"); SDL_SetHint(SDL_HINT_AUDIODRIVER, "dummy"); }   // self-test modes never open a real window (except --gpu)
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");                                             // touches arrive as finger events (one finger = the left button), not as SDL's own fake mouse events
 #ifdef __ANDROID__
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");                                        // the Back button is a game key (see below), not "close the app"
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");                        // landscape only (the manifest says the same)
 #endif
     if (SDL_Init(initFlags) != 0) { fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError()); return 1; }
@@ -519,6 +530,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
             tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, gl::fbW, gl::fbH);
             if (gl::g_fastQuad) texq = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, 512, 256);     // the game's own framebuffer texture, scaled by the GPU (see gl_soft.inc, PendingQuad)
         }
+        setWindowIconFromApk(win);
         SDL_AudioSpec want{}, have{}; want.freq = 44100; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = 1024; want.callback = audioCallback;
         adev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
         if (adev) { audio::devRate = have.freq; SDL_PauseAudioDevice(adev, 0); } else fprintf(stderr, "audio unavailable: %s\n", SDL_GetError());
@@ -663,6 +675,10 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
                 applyStick(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX), SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY));
                 break; }
             case SDL_KEYDOWN: case SDL_KEYUP: {
+                if (e.key.keysym.scancode == SDL_SCANCODE_AC_BACK) {                                        // Android's Back button / gesture: like the controller's B (game key 73); on the title menu it leaves the game
+                    if (e.key.repeat) break;
+                    if (e.type == SDL_KEYDOWN && titleMenuShown()) { g_wantQuit = true; break; }
+                    inputKey(73, e.type == SDL_KEYDOWN); break; }
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F11) { Uint32 f = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP; SDL_SetWindowFullscreen(win, f ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP); break; }
                 if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F12) { char b[64]; snprintf(b, sizeof b, "screenshot_%03d.png", shot++); savePng(b); fprintf(stderr, "saved %s\n", b); break; }
                 if (e.type == SDL_KEYDOWN) { g_inDev = ov::KEYBOARD; g_touchUiOn = false; }

@@ -436,10 +436,16 @@ static bool confirmExit() {
 static void setWindowIconFromApk(SDL_Window* w) {
     std::vector<uint8_t> png; if (!w || !apkRead("res/drawable-hdpi/icon.png", png)) return;
     int iw = 0, ih = 0, n = 0; unsigned char* px = stbi_load_from_memory(png.data(), (int)png.size(), &iw, &ih, &n, 4); if (!px) return;
-    {   // re-shade it to aqua / turquoise / green (a gradient map on the brightness; the same map tools/icon-tint.ps1 applies to the exe and the Android icon)
-        static const float st[4][4] = {{0.f, 2, 24, 32}, {0.45f, 18, 160, 150}, {0.8f, 110, 235, 210}, {1.f, 225, 255, 245}};
-        for (int i = 0; i < iw * ih; i++) { unsigned char* c = px + 4 * i; float l = (0.299f * c[0] + 0.587f * c[1] + 0.114f * c[2]) / 255.f; int k = 1; while (k < 3 && l > st[k][0]) k++;
-            float u = std::min(1.f, std::max(0.f, (l - st[k - 1][0]) / (st[k][0] - st[k - 1][0]))); for (int j = 0; j < 3; j++) c[j] = (unsigned char)(st[k - 1][1 + j] + (st[k][1 + j] - st[k - 1][1 + j]) * u); }
+    {   // recolour the glove (the red-orange part) to aqua / turquoise / green and leave the rest: same rule as tools/icon-tint.ps1 (hue near 15 degrees, clearly coloured -> hue + 160 degrees)
+        for (int i = 0; i < iw * ih; i++) {
+            unsigned char* c = px + 4 * i; float r = c[0] / 255.f, g = c[1] / 255.f, b = c[2] / 255.f, mx = std::max(r, std::max(g, b)), mn = std::min(r, std::min(g, b)), d = mx - mn; if (d < 1e-4f || mx < 1e-4f) continue;
+            float s = d / mx, h = mx == r ? 60.f * fmodf((g - b) / d, 6.f) : mx == g ? 60.f * ((b - r) / d + 2.f) : 60.f * ((r - g) / d + 4.f); if (h < 0) h += 360.f;
+            float dh = fabsf(h - 15.f); if (dh > 180.f) dh = 360.f - dh;
+            float wgt = std::min(1.f, std::max(0.f, (60.f - dh) / 25.f)) * std::min(1.f, std::max(0.f, (s - .2f) / .2f)); if (wgt <= 0.f) continue;
+            float h2 = fmodf(h + 160.f * wgt, 360.f), cc = mx * s, xx = cc * (1.f - fabsf(fmodf(h2 / 60.f, 2.f) - 1.f)), m = mx - cc, o[3];
+            switch ((int)(h2 / 60.f)) { case 0: o[0] = cc; o[1] = xx; o[2] = 0; break; case 1: o[0] = xx; o[1] = cc; o[2] = 0; break; case 2: o[0] = 0; o[1] = cc; o[2] = xx; break; case 3: o[0] = 0; o[1] = xx; o[2] = cc; break; case 4: o[0] = xx; o[1] = 0; o[2] = cc; break; default: o[0] = cc; o[1] = 0; o[2] = xx; }
+            for (int j = 0; j < 3; j++) c[j] = (unsigned char)((o[j] + m) * 255.f);
+        }
     }
     if (SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(px, iw, ih, 32, iw * 4, SDL_PIXELFORMAT_RGBA32)) { SDL_SetWindowIcon(w, s); SDL_FreeSurface(s); }
     stbi_image_free(px);

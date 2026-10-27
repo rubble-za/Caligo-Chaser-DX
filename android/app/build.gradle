@@ -18,5 +18,8 @@ android {
     // A private test build bundles the user's own game files: build-bundled.ps1 sets CC_BUNDLE_DIR to a folder holding them (never committed or shared)
     def bundle = System.getenv('CC_BUNDLE_DIR')
     if (bundle) sourceSets.main.assets.srcDirs += [bundle]
+    // build-android.ps1 -IconFromApk puts the original game's launcher icon (extracted from the user's own APK, never committed) in CC_ICON_DIR; the debug variant's resources override the neutral icon in src/main/res
+    def iconDir = System.getenv('CC_ICON_DIR')
+    if (iconDir) sourceSets.debug.res.srcDirs += [iconDir]
     buildTypes { release { minifyEnabled false; signingConfig signingConfigs.debug } }
 }

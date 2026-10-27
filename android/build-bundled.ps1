@@ -10,7 +10,7 @@ Copy-Item $GameApk "$bundle\CaligoChaser.apk"; Copy-Item "$DataDir\Com2uS" "$bun
 $files = @('CaligoChaser.apk') + (Get-ChildItem "$bundle\Com2uS" -Recurse -File | ForEach-Object { $_.FullName.Substring($bundle.Length + 1).Replace('\', '/') })
 [IO.File]::WriteAllText("$bundle\files.txt", ($files -join "`n"), (New-Object Text.UTF8Encoding($false)))
 $env:CC_BUNDLE_DIR = $bundle; $env:CC_BUILD_ROOT_OVERRIDE = "$B\bundled"
-& "$PSScriptRoot\build-android.ps1"
+& "$PSScriptRoot\build-android.ps1" -IconFromApk $GameApk
 $apk = "$B\bundled\android-gradle\outputs\apk\debug\app-debug.apk"
 if (-not (Test-Path $apk)) { $apk = "$B\android-gradle\outputs\apk\debug\app-debug.apk" }
 Copy-Item $apk $Out -Force; Write-Host "Built $Out ($([math]::Round((Get-Item $Out).Length / 1MB, 1)) MB) - private, do not share"

@@ -53,7 +53,7 @@ public class SetupActivity extends Activity {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL); col.setGravity(Gravity.CENTER_HORIZONTAL);
         int pad = (int) (24 * getResources().getDisplayMetrics().density); col.setPadding(pad, pad, pad, pad);
-        TextView title = new TextView(this); title.setText("Caligo Chaser - first-time setup"); title.setTextSize(24); col.addView(title);
+        TextView title = new TextView(this); title.setText("Caligo Chaser DX - first-time setup"); title.setTextSize(24); col.addView(title);
         TextView info = new TextView(this);
         info.setText("This app does not contain the game. Choose your own copies of the Caligo Chaser APK (version 1.0.4) and of the Com2uS data folder (it contains com.com2us.caligo with resources.csr). They are copied into the app once and never leave your phone.");
         info.setPadding(0, pad / 2, 0, pad / 2); col.addView(info);

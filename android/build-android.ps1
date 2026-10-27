@@ -20,7 +20,9 @@ if ($IconFromApk -and (Test-Path $IconFromApk)) {
                 New-Item -ItemType Directory -Force "$icons\mipmap-$($d.Key)" | Out-Null; $bmp = New-Object Drawing.Bitmap $d.Value, $d.Value; $g = [Drawing.Graphics]::FromImage($bmp)
                 $g.InterpolationMode = 'HighQualityBicubic'; $g.PixelOffsetMode = 'HighQuality'; $g.DrawImage($hd, 0, 0, $d.Value, $d.Value); $g.Dispose(); $bmp.Save("$icons\mipmap-$($d.Key)\ic_launcher.png", [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
             }
-            $hd.Dispose(); $env:CC_ICON_DIR = $icons; Write-Host "Using the launcher icon from $IconFromApk"
+            $hd.Dispose()
+            foreach ($f in Get-ChildItem "$icons\mipmap-*\ic_launcher.png") { $img = [Drawing.Bitmap]::FromFile($f.FullName); $bm = New-Object Drawing.Bitmap $img; $img.Dispose(); Add-DxBadge $bm; $bm.Save($f.FullName, [Drawing.Imaging.ImageFormat]::Png); $bm.Dispose() }          # the DX badge, drawn at each size
+            $env:CC_ICON_DIR = $icons; Write-Host "Using the launcher icon from $IconFromApk"
         } else { Write-Host 'No launcher icon found in that APK; using the neutral icon.' }
     } finally { $z.Dispose() }
 }& "$sdk\cmake\3.22.1\bin\cmake.exe" -S "$root\android\app\jni" -B "$B\android" -G Ninja "-DCMAKE_MAKE_PROGRAM=$sdk\cmake\3.22.1\bin\ninja.exe" "-DCMAKE_TOOLCHAIN_FILE=$ndk\build\cmake\android.toolchain.cmake" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 -DANDROID_STL=c++_shared -DCMAKE_BUILD_TYPE=Release "-DT=$($T -replace '\\','/')"

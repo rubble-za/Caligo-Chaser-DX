@@ -1,4 +1,4 @@
-// Caligo Chaser desktop host.
+// Caligo Chaser DX desktop host.
 // Runs the game's original ARM code (read from the user's own APK) inside an emulator, with the Java/Android
 // side re-implemented natively: SDL2 window + input, software GLES1 renderer, audio mixer.
 #include <set>
@@ -404,7 +404,7 @@ static void sleepUntil(Uint64 target, Uint64 freq) {
 
 static void usage() {
     fprintf(stderr,
-        "Caligo Chaser host\n"
+        "Caligo Chaser DX host\n"
         "  --apk <file>     original CaligoChaser APK (default: first *.apk in the current folder)\n"
         "  --data <dir>     folder that contains Com2uS/com.com2us.caligo/ (default: current folder)\n"
         "  --save <dir>     where settings/saves are written (default: ./save)\n"
@@ -429,7 +429,7 @@ static void usage() {
 // "Are you sure you want to exit?" (Android Back on the title menu)
 static bool confirmExit() {
     const SDL_MessageBoxButtonData btns[] = {{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel"}, {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Exit"}};
-    SDL_MessageBoxData d{SDL_MESSAGEBOX_INFORMATION, nullptr, "Caligo Chaser", "Are you sure you want to exit?", 2, btns, nullptr}; int id = 1;
+    SDL_MessageBoxData d{SDL_MESSAGEBOX_INFORMATION, nullptr, "Caligo Chaser DX", "Are you sure you want to exit?", 2, btns, nullptr}; int id = 1;
     return SDL_ShowMessageBox(&d, &id) < 0 || id == 1;                                      // (if the dialog cannot be shown, leave rather than trap the player)
 }
 // The window / taskbar icon: the game's own launcher icon, read from the user's APK at run time (nothing is stored).
@@ -446,6 +446,17 @@ static void setWindowIconFromApk(SDL_Window* w) {
             switch ((int)(h2 / 60.f)) { case 0: o[0] = cc; o[1] = xx; o[2] = 0; break; case 1: o[0] = xx; o[1] = cc; o[2] = 0; break; case 2: o[0] = 0; o[1] = cc; o[2] = xx; break; case 3: o[0] = 0; o[1] = xx; o[2] = cc; break; case 4: o[0] = xx; o[1] = 0; o[2] = cc; break; default: o[0] = cc; o[1] = 0; o[2] = xx; }
             for (int j = 0; j < 3; j++) c[j] = (unsigned char)((o[j] + m) * 255.f);
         }
+    }
+    {   // the "DX" badge in the bottom right corner (same geometry and colours as Add-DxBadge in tools/icon-tint.ps1)
+        const int W = iw, H = ih, bw = (int)lroundf(W * .5f), bh = (int)lroundf(H * .3f), mg = std::max(1, (int)lroundf(W * .04f)), x0 = W - bw - mg, y0 = H - bh - mg, t = std::max(1, (int)lroundf(W * .022f));
+        const int cell = std::max(1, (int)std::floor(std::min(bw * .8f / 11.f, bh * .72f / 7.f)));
+        auto fillRect = [&](int x, int y, int w, int h, int r, int g, int b) { for (int yy = y; yy < y + h; yy++) for (int xx = x; xx < x + w; xx++) if (xx >= 0 && xx < W && yy >= 0 && yy < H) { unsigned char* c = px + 4 * (yy * W + xx); c[0] = (unsigned char)r; c[1] = (unsigned char)g; c[2] = (unsigned char)b; c[3] = 255; } };
+        fillRect(x0, y0, bw, bh, 240, 184, 70); fillRect(x0 + t, y0 + t, bw - 2 * t, bh - 2 * t, 6, 16, 34);
+        static const unsigned char GD[7] = {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}, GX[7] = {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11};
+        const int tx = x0 + (bw - 11 * cell) / 2, ty = y0 + (bh - 7 * cell) / 2;
+        for (int row = 0; row < 7; row++) for (int col = 0; col < 5; col++) {
+            if (GD[row] >> (4 - col) & 1) fillRect(tx + col * cell, ty + row * cell, cell, cell, 255, 238, 176);
+            if (GX[row] >> (4 - col) & 1) fillRect(tx + (6 + col) * cell, ty + row * cell, cell, cell, 255, 238, 176); }
     }
     if (SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(px, iw, ih, 32, iw * 4, SDL_PIXELFORMAT_RGBA32)) { SDL_SetWindowIcon(w, s); SDL_FreeSurface(s); }
     stbi_image_free(px);
@@ -490,7 +501,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
         { std::error_code e3; if (std::filesystem::exists(base + "/force_pad", e3)) { g_inDev = ov::CONTROLLER; g_touchUiOn = false; } }          // dev: a file called force_pad in the game folder starts in controller mode (for testing without a controller)
         if (g_dataRoot == ".") g_dataRoot = base; if (g_saveRoot == "save") g_saveRoot = base + "/save";
         if (apk.empty()) { std::error_code ec; for (auto& e : std::filesystem::directory_iterator(base, ec)) if (e.path().extension() == ".apk") { apk = e.path().string(); break; } }
-        std::error_code ec2; if (apk.empty() || !std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr", ec2)) { SDL_Log("base=%s apk=%s ec=%s", base.c_str(), apk.c_str(), ec2.message().c_str()); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Caligo Chaser", ("Copy your APK and the Com2uS folder into:\n" + base).c_str(), nullptr); return 1; }
+        std::error_code ec2; if (apk.empty() || !std::filesystem::exists(g_dataRoot + "/Com2uS/com.com2us.caligo/resources.csr", ec2)) { SDL_Log("base=%s apk=%s ec=%s", base.c_str(), apk.c_str(), ec2.message().c_str()); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Caligo Chaser DX", ("Copy your APK and the Com2uS folder into:\n" + base).c_str(), nullptr); return 1; }
     }
 #endif
     if (apk.empty()) { std::error_code ec; for (auto& e : std::filesystem::directory_iterator(".", ec)) if (e.path().extension() == ".apk") { apk = e.path().string(); break; } }
@@ -520,7 +531,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
     SDL_Window* win = nullptr; SDL_Renderer* ren = nullptr; SDL_Texture* tex = nullptr; SDL_Texture* texq = nullptr; SDL_AudioDeviceID adev = 0;
     const Uint32 winFlags = SDL_WINDOW_RESIZABLE | (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
     if (wantHw) {                                                  // GPU renderer: OpenGL window + offscreen framebuffer; falls back to software if anything is missing
-        win = SDL_CreateWindow("Caligo Chaser", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags | SDL_WINDOW_OPENGL | (hl ? SDL_WINDOW_HIDDEN : 0));
+        win = SDL_CreateWindow("Caligo Chaser DX", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags | SDL_WINDOW_OPENGL | (hl ? SDL_WINDOW_HIDDEN : 0));
         if (!win || !gl::hw::init(win)) { if (win) SDL_DestroyWindow(win); win = nullptr; fprintf(stderr, "GPU renderer unavailable, using the software renderer\n"); }
         else {                                                      // pacing: vsync only paces evenly when the frame time is a whole number of display refreshes
             SDL_DisplayMode dm; int di = SDL_GetWindowDisplayIndex(win), R = (di >= 0 && SDL_GetCurrentDisplayMode(di, &dm) == 0) ? dm.refresh_rate : 0;
@@ -533,7 +544,7 @@ int main(int argc, char** argv) {    std::string apk, script, inject, dumpDir = 
     }
     if (!hl) {
         if (!win) {
-            win = SDL_CreateWindow("Caligo Chaser", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags);
+            win = SDL_CreateWindow("Caligo Chaser DX", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, gl::fbW * scale, gl::fbH * scale, winFlags);
             if (!win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return 1; }
             #ifdef __ANDROID__
             SDL_SetThreadPriority(SDL_THREAD_PRIORITY_TIME_CRITICAL);                            // the game thread must not be starved by background work

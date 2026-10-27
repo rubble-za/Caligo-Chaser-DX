@@ -1,13 +1,13 @@
-CALIGO CHASER - PC port
+CALIGO CHASER DX - PC and Android port
 =======================
 This runs the ORIGINAL game code from your own APK, with the Android parts re-implemented natively
 (window, input, audio, a software OpenGL ES renderer). Nothing is converted or re-drawn, so it plays like the original.
 
 WINDOWS
-  1. Put CaligoChaser.exe in a folder together with:
+  1. Put CaligoChaserDX.exe in a folder together with:
         - your APK        (e.g. CaligoChaser_1.0.4.apk)
         - the "Com2uS" folder you copied from the phone (contains com.com2us.caligo\resources.csr and SE\*.wav)
-  2. Double-click CaligoChaser.exe.  (A console window shows log messages; ignore it.)
+  2. Double-click CaligoChaserDX.exe.  (A console window shows log messages; ignore it.)
   Options (run from a command prompt):  --apk <file>  --data <folder that contains Com2uS>  --save <folder>  --scale 2  --fullscreen
 
 CONTROLS

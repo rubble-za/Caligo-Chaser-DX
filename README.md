@@ -1,6 +1,6 @@
-# Caligo Chaser Port
+# Caligo Chaser DX
 
-A desktop port of the Android game **Caligo Chaser** (Com2uS, APK v1.0.4) for Windows (and Linux, Android), with controller, keyboard and mouse support.
+**Caligo Chaser DX** is a "redux" of the Android game **Caligo Chaser** (Com2uS, APK v1.0.4): a desktop and Android port for Windows (and Linux, Android), with controller, keyboard and mouse support.
 
 It is not a rewrite. The original game code is read from **your own copy of the APK** and run through a JIT compiler (dynarmic), while the Android side (window, input, sound, timers, save files) is re-implemented natively. The game's OpenGL ES 1 calls are replayed through desktop OpenGL on your graphics card (with a built-in software renderer as automatic fallback, or `--soft`), and SDL2 provides the window and input.
 
@@ -15,7 +15,7 @@ Nothing from the game is stored in this repository, and the program never modifi
 
 ## Getting the program
 
-The game also needs the port's own executable (`CaligoChaser.exe` on Windows, `CaligoChaser` on Linux). It is **not** generated from the APK or the data folder. It is the port itself, compiled from the source in `src/`. Either build it yourself (see Building below) or download a prebuilt one from GitHub Releases, then put it in a folder together with your APK and the `Com2uS` data folder.
+The game also needs the port's own executable (`CaligoChaserDX.exe` on Windows, `CaligoChaserDX` on Linux). It is **not** generated from the APK or the data folder. It is the port itself, compiled from the source in `src/`. Either build it yourself (see Building below) or download a prebuilt one from GitHub Releases, then put it in a folder together with your APK and the `Com2uS` data folder.
 
 ## Features
 
@@ -30,7 +30,7 @@ See `README.txt` for the full controls and options.
 
 ## Building
 
-Windows (native, needs only Git for Windows): `powershell -ExecutionPolicy Bypass -File build-windows.ps1`. It downloads llvm-mingw, CMake, Ninja, dynarmic, the Boost headers and the libraries into `third_party\` and writes `build-win\CaligoChaser.exe`.
+Windows (native, needs only Git for Windows): `powershell -ExecutionPolicy Bypass -File build-windows.ps1`. It downloads llvm-mingw, CMake, Ninja, dynarmic, the Boost headers and the libraries into `third_party\` and writes `build-win\CaligoChaserDX.exe`.
 Android (arm64, phones with Android 7+): see `android/` - `android\build-android.ps1` builds a debug APK (needs the JDK 17, Android SDK + NDK 26, Gradle). The app asks for your own game APK and Com2uS folder on first launch; `android\build-android.ps1 -IconFromApk "<your APK>"` gives the app the original game's launcher icon (otherwise it uses a neutral built-in one); `android\build-bundled.ps1` can build a private test APK that carries them (never share that one).
 Linux: `./build-linux.sh` (needs g++, cmake, ninja, git; fetches Unicorn, SDL2, miniz and stb; uses the Unicorn CPU backend, `-DCC_UNICORN`).
 Windows (cross-compiled from Linux with llvm-mingw): `./build-windows-from-linux.sh`.

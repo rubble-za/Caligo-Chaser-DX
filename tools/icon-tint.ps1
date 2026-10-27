@@ -17,3 +17,18 @@ function Convert-IconTeal([System.Drawing.Bitmap]$bmp) {
         $bmp.SetPixel($x, $y, [System.Drawing.Color]::FromArgb($c.A, [int](($o[0] + $m) * 255), [int](($o[1] + $m) * 255), [int](($o[2] + $m) * 255)))
     } }
 }
+# A "DX" badge in the bottom right corner of the icon (as in Link's Awakening DX): dark plate with a gold border, pixel-font letters. main.cpp draws the same badge on the run-time window icon.
+function Add-DxBadge([System.Drawing.Bitmap]$bmp) {
+    $W = $bmp.Width; $H = $bmp.Height
+    $bw = [int][Math]::Round($W * 0.50); $bh = [int][Math]::Round($H * 0.30); $mg = [int][Math]::Max(1, [Math]::Round($W * 0.04)); $x0 = $W - $bw - $mg; $y0 = $H - $bh - $mg
+    $t = [int][Math]::Max(1, [Math]::Round($W * 0.022)); $cell = [int][Math]::Max(1, [Math]::Floor([Math]::Min(($bw * 0.8) / 11.0, ($bh * 0.72) / 7.0)))
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $gold = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 240, 184, 70)); $plate = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 6, 16, 34)); $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 255, 238, 176))
+    $g.FillRectangle($gold, $x0, $y0, $bw, $bh); $g.FillRectangle($plate, $x0 + $t, $y0 + $t, $bw - 2 * $t, $bh - 2 * $t)
+    $D = 0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E; $X = 0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11
+    $tx = $x0 + [int](($bw - 11 * $cell) / 2); $ty = $y0 + [int](($bh - 7 * $cell) / 2)
+    for ($row = 0; $row -lt 7; $row++) { for ($col = 0; $col -lt 5; $col++) {
+        if (($D[$row] -shr (4 - $col)) -band 1) { $g.FillRectangle($ink, $tx + $col * $cell, $ty + $row * $cell, $cell, $cell) }
+        if (($X[$row] -shr (4 - $col)) -band 1) { $g.FillRectangle($ink, $tx + (6 + $col) * $cell, $ty + $row * $cell, $cell, $cell) } } }
+    $g.Dispose()
+}

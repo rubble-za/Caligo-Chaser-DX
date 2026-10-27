@@ -8,4 +8,4 @@ Components built into the executable:
   stb_vorbis .................. public domain / MIT
 Optional builds made with -DCC_UNICORN use Unicorn Engine 2.1.3 (GPL-2.0) instead of dynarmic; such a build is GPL-2.0 as a whole.
 The host code in the repository's src folder (main.cpp, host.cpp, *.inc) is offered under GPL-2.0-or-later.
-Caligo Chaser and its assets belong to Com2uS; use only copies you are entitled to use.
+Caligo Chaser and its assets belong to Com2uS; use only copies you are entitled to use. Caligo Chaser DX is an unofficial fan port and is not affiliated with Com2uS.

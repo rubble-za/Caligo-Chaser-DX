@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // GPU renderer placeholder for platforms where the desktop-OpenGL path (gl_hw.inc) is not built (Android: the first port uses the software renderer + SDL_Renderer).
 // Same interface as gl_hw.inc; `on` stays false so none of the other functions is ever reached.
 namespace hw {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Caligo Chaser host: loads the original 32-bit ARM libgame.so into Unicorn,
 // resolves its imports to host-side implementations (libc, GLES1, JNI).
 // Stage 1: loader + import tracing.

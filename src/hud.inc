@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Re-laid-out gameplay HUD ("composed HUD"): while playing, the game's 384x256 picture is split into the world (rows 0..219) and the hotbar.
 // The world is stretched over the whole window (the baked-in tan bar is simply never shown). From the game's own framebuffer, live, we cut out the 18x18 interior of each of
 // the five slots (icon, count, cooldown) and the EXP label and bar, and draw them in a compact group centred at the bottom with a thin two-tone border we draw ourselves.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Reads files straight out of the user's APK (libgame.so, music) so nothing from the game has to be extracted or redistributed.
 #include "miniz.h"
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Optional GPU path. The GLES1 state tracked by gl_soft.inc is replayed through desktop OpenGL 1.x onto an offscreen
 // framebuffer of the same size as the software one (800x480 * rs), which is then letter-boxed into the window.
 // Everything the game uses exists in OpenGL 1.1, so only the framebuffer-object entry points need loading at run time.

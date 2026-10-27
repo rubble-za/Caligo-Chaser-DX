@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Input-hint overlay: a translucent strip at the bottom of menus showing which button does what for the input method in use
 // (controller / keyboard / mouse). Drawn by the host on top of the finished frame, never into the game's own framebuffer.
 // The font and every icon are generated here (5x7 pixel font, circles, keycaps), nothing is taken from the game.

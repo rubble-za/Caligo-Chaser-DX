@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Host-side implementations of the libc/libm/bionic imports used by libgame.so.
 // Included by main.cpp (after the call-context helpers are defined).
 #include <ctime>

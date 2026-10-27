@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Host-side emulation of the Java half (WrapperManager/SoundManager/WrapperActivity) that libgame.so calls via JNI,
 // plus the frame stepping that mirrors WrapperManager.run().
 

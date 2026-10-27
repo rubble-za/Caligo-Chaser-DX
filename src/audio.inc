@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Audio engine: WAV + Ogg Vorbis decoding and a small mixer, plus a re-implementation of the original
 // SoundManager (Android SoundPool for effects, MediaPlayer-style clips for music) on top of it.
 extern "C" int stb_vorbis_decode_memory(const unsigned char* mem, int len, int* channels, int* sample_rate, short** output);

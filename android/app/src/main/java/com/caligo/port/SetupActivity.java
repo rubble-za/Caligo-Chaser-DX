@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 package com.caligo.port;
 
 import android.app.Activity;

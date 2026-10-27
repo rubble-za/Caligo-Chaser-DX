@@ -79,3 +79,6 @@ TITLE MENU
 
 KNOWN LIMITS (this build)
   - Text-input fields (player names for online features) are not wired yet.
+
+LICENCE
+  The code of this port is released under the MIT licence (see LICENSE). The game and its artwork belong to Com2uS and are not part of this port. Licences of the built-in open-source components: LICENSES.txt, THIRD-PARTY-NOTICES.txt.

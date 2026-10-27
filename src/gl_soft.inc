@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Software implementation of the OpenGL ES 1.x subset used by libgame.so.
 // Deterministic, driver-independent, and identical on Windows/Android/Linux.
 // Vertex arrays live in guest memory; textures/framebuffer live on the host.

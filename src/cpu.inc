@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // The ARM CPU behind the host. Default: dynarmic, a JIT that translates the guest's ARM/Thumb code to the host CPU (x86-64 or arm64) and runs it directly.
 // -DCC_UNICORN builds the original Unicorn (QEMU TCG) interpreter instead: slower, but it has the dev hooks (CC_PROFILE, CC_HOOKVK, CC_WLOG).
 // Either way the rest of the host only sees: rd32/wr32/rdbuf/wrbuf/rdstr (guest memory), reg/setreg (registers), callGuest (run guest code until it returns),

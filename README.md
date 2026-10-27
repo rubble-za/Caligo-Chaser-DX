@@ -39,4 +39,6 @@ Prebuilt binaries, if provided, are attached to GitHub Releases rather than comm
 
 ## Licence
 
-The default builds use dynarmic (0BSD); builds made with `-DCC_UNICORN` use Unicorn Engine (GPL-2.0). The host code is offered under GPL-2.0-or-later. See `LICENSES.txt` and `THIRD-PARTY-NOTICES.txt` (the full licence texts of everything built in). Caligo Chaser and its assets belong to Com2uS; this project is unaffiliated.
+The source code of this project (the host in src/, the Android app in ndroid/, the build scripts and tools) is released under the **MIT licence** - see LICENSE. You are welcome to use, change and share it.
+
+The game itself, its assets and its logo/icon artwork belong to Com2uS and are **not** covered by this licence; this project is an unofficial fan port and is not affiliated with Com2uS. Open-source components built into the program keep their own licences (dynarmic is 0BSD; the others are MIT, BSD, zlib or Boost): see LICENSES.txt and THIRD-PARTY-NOTICES.txt. Builds made with -DCC_UNICORN use Unicorn Engine (GPL-2.0) instead of dynarmic, and such a build is GPL-2.0 as a whole.

@@ -7,6 +7,6 @@ Components built into the executable:
   miniz 3.0.2 ................. MIT
   stb_vorbis .................. public domain / MIT
 Optional builds made with -DCC_UNICORN use Unicorn Engine 2.1.3 (GPL-2.0) instead of dynarmic; such a build is GPL-2.0 as a whole.
-The host code in the repository's src folder (main.cpp, host.cpp, *.inc) is offered under GPL-2.0-or-later.
+The code of this project itself (the host in the src folder, the Android app, the build scripts) is released under the MIT licence: see the LICENSE file.
 Caligo Chaser and its assets belong to Com2uS; use only copies you are entitled to use. Caligo Chaser DX is an unofficial fan port and is not affiliated with Com2uS.
 The full licence texts of the components above are in THIRD-PARTY-NOTICES.txt (included in every download and in the Android app's assets).

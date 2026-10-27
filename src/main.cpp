@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Caligo Chaser DX desktop host.
 // Runs the game's original ARM code (read from the user's own APK) inside an emulator, with the Java/Android
 // side re-implemented natively: SDL2 window + input, software GLES1 renderer, audio mixer.

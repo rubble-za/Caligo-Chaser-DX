@@ -47,7 +47,7 @@ public class SetupActivity extends Activity {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
-        if (ready()) { startGame(); return; }
+        if (!getIntent().getBooleanExtra("force", false) && ready()) { startGame(); return; }          // (adb shell am start -n com.caligo.port/.SetupActivity --ez force true shows this screen even when set up)
         apkDone = new File(privateDir(), "CaligoChaser.apk").isFile();
         dataDone = new File(privateDir(), "Com2uS/com.com2us.caligo/resources.csr").isFile();
         LinearLayout col = new LinearLayout(this);
@@ -69,7 +69,7 @@ public class SetupActivity extends Activity {
         btnDir.setText((dataDone ? "\u2714 " : "2. ") + "Choose the Com2uS folder" + (dataDone ? " (done)" : ""));
         btnApk.setEnabled(!busy); btnDir.setEnabled(!busy);
         status.setText(msg);
-        if (apkDone && dataDone && !busy) startGame();
+        if (apkDone && dataDone && !busy && !getIntent().getBooleanExtra("force", false)) startGame();
     }
 
     private void pick(int req) {

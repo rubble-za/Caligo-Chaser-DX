@@ -102,7 +102,7 @@ static bool composeSoft(std::vector<uint32_t>& dst) {
     }
     return true;
 }// The same composed gameplay layout, title highlight and button hints as the GPU path in gl_hw.inc, but drawn with SDL's renderer from the game's 512x256 picture texture (used on Android).
-static std::map<const ov::Bitmap*, SDL_Texture*> g_hintTex;
+static SDL_Texture* g_hintTex = nullptr; static int g_hintTexKey = -1, g_hintTexW = 0, g_hintTexH = 0;      // the strip is one reused bitmap object whose contents change with the menu, so the texture is rebuilt whenever its key or size changes
 static void composeSdl(SDL_Renderer* ren, SDL_Texture* texq, const gl::Tex& gt, bool comp, const ov::Bitmap* hintBm, int hlIdx) {
     const float rs = (float)gl::rs, K = hud::K, SY = hud::SY;
     auto F = [&](float x, float y, float w, float h) { SDL_FRect r{x * rs, y * rs, w * rs, h * rs}; return r; };
@@ -144,9 +144,12 @@ static void composeSdl(SDL_Renderer* ren, SDL_Texture* texq, const gl::Tex& gt, 
         SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
     }
     if (hintBm && hintBm->w > 0) {                                                                                        // button hints
-        SDL_Texture*& ht = g_hintTex[hintBm];
-        if (!ht) { ht = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, hintBm->w, hintBm->h); SDL_UpdateTexture(ht, nullptr, hintBm->px.data(), hintBm->w * 4); SDL_SetTextureBlendMode(ht, SDL_BLENDMODE_BLEND); }
-        SDL_Rect d{hintBm->x0, hintBm->y0, hintBm->w, hintBm->h}; SDL_RenderCopy(ren, ht, nullptr, &d);
+        if (!g_hintTex || g_hintTexKey != hintBm->key || g_hintTexW != hintBm->w || g_hintTexH != hintBm->h) {
+            if (g_hintTex) SDL_DestroyTexture(g_hintTex);
+            g_hintTex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, hintBm->w, hintBm->h); SDL_UpdateTexture(g_hintTex, nullptr, hintBm->px.data(), hintBm->w * 4); SDL_SetTextureBlendMode(g_hintTex, SDL_BLENDMODE_BLEND);
+            g_hintTexKey = hintBm->key; g_hintTexW = hintBm->w; g_hintTexH = hintBm->h;
+        }
+        SDL_Rect d{hintBm->x0, hintBm->y0, hintBm->w, hintBm->h}; SDL_RenderCopy(ren, g_hintTex, nullptr, &d);
     }
 }static const std::vector<uint32_t>& presentFb() {
     gl::ensureFb(); gl::flushQuad();

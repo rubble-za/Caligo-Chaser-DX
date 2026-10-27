@@ -39,4 +39,4 @@ Prebuilt binaries, if provided, are attached to GitHub Releases rather than comm
 
 ## Licence
 
-The default builds use dynarmic (0BSD); builds made with `-DCC_UNICORN` use Unicorn Engine (GPL-2.0). The host code is offered under GPL-2.0-or-later. See `LICENSES.txt`. Caligo Chaser and its assets belong to Com2uS; this project is unaffiliated.
+The default builds use dynarmic (0BSD); builds made with `-DCC_UNICORN` use Unicorn Engine (GPL-2.0). The host code is offered under GPL-2.0-or-later. See `LICENSES.txt` and `THIRD-PARTY-NOTICES.txt` (the full licence texts of everything built in). Caligo Chaser and its assets belong to Com2uS; this project is unaffiliated.

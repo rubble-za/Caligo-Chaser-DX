@@ -38,3 +38,6 @@ android/app/src/main/jniLibs/
 
 CaligoChaserDX.exe
 CaligoChaserDX
+
+# the neutral Linux AppImage icon (our own artwork)
+!packaging/linux/caligochaserdx.png

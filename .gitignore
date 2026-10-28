@@ -41,3 +41,10 @@ CaligoChaserDX
 
 # the neutral Linux AppImage icon (our own artwork)
 !packaging/linux/caligochaserdx.png
+
+# never commit handoff docs or Claude Code planning/memory files
+*HANDOFF*.md
+.claude/
+CLAUDE.local.md
+memory/
+MEMORY.md

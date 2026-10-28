@@ -65,6 +65,11 @@ ANDROID
   folder with the system file picker and copies them into the app once. Touch controls are the game's own on-screen d-pad and buttons (one finger at a time); a connected controller also works.
   The game runs in landscape and the picture is letter-boxed to its 5:3 shape.
 
+LINUX
+  Download CaligoChaserDX-x86_64.AppImage (normal PCs) or CaligoChaserDX-aarch64.AppImage (arm64), make it executable (chmod +x) and run it. It contains no game files: on first run it
+  looks for your Caligo Chaser APK and the Com2uS folder next to the AppImage, or asks you to pick them (KDE or GTK file dialog), and copies them once into
+  ~/.local/share/CaligoChaserDX/ (saves go to its "save" folder). Newer distributions without FUSE 2 can run it with --appimage-extract-and-run after the file name.
+
 SAVES
   Written to the "save" folder next to the program (your original data folder is never modified).
 

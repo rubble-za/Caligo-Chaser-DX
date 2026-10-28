@@ -25,12 +25,19 @@ jobs:
           ./build-linux/CaligoChaserDX --help || true
           file build-linux/CaligoChaserDX
           ldd build-linux/CaligoChaserDX
-      - name: Package
+      - name: Package AppImage
         run: |
-          d=CaligoChaserDX-linux-${{ matrix.arch }}
-          mkdir "$d" && cp build-linux/CaligoChaserDX LICENSE LICENSES.txt THIRD-PARTY-NOTICES.txt README.txt "$d"/
-          tar czf "$d.tar.gz" "$d"
+          A=${{ matrix.arch }}
+          mkdir -p AppDir/usr/bin AppDir/usr/share/doc/CaligoChaserDX
+          cp build-linux/CaligoChaserDX AppDir/usr/bin/
+          cp packaging/linux/AppRun AppDir/AppRun && chmod +x AppDir/AppRun
+          cp packaging/linux/caligochaserdx.desktop packaging/linux/caligochaserdx.png AppDir/
+          cp LICENSE LICENSES.txt THIRD-PARTY-NOTICES.txt README.txt AppDir/usr/share/doc/CaligoChaserDX/
+          curl -fL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$A.AppImage"
+          chmod +x appimagetool
+          ARCH=$A ./appimagetool --appimage-extract-and-run AppDir "CaligoChaserDX-$A.AppImage"
+          ls -l "CaligoChaserDX-$A.AppImage"
       - uses: actions/upload-artifact@v4
         with:
           name: CaligoChaserDX-linux-${{ matrix.arch }}
-          path: CaligoChaserDX-linux-${{ matrix.arch }}.tar.gz
+          path: CaligoChaserDX-${{ matrix.arch }}.AppImage

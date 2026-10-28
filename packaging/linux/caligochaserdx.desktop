@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Caligo Chaser DX
+Comment=Unofficial port of Caligo Chaser (needs your own copy of the game files)
+Exec=CaligoChaserDX
+Icon=caligochaserdx
+Categories=Game;
+Terminal=false

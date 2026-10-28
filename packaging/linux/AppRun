@@ -1,0 +1,40 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# AppImage entry point. The AppImage contains only this project's own code: on first run it asks for your copy of the game's APK and
+# its Com2uS data folder, copies them to ~/.local/share/CaligoChaserDX and starts the game from there.
+HERE="$(dirname "$(readlink -f "$0")")"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/CaligoChaserDX"
+mkdir -p "$DATA/save"
+BESIDE=""; [ -n "$APPIMAGE" ] && BESIDE="$(dirname "$APPIMAGE")"
+
+say()  { if command -v kdialog >/dev/null 2>&1; then kdialog --msgbox "$1"; elif command -v zenity >/dev/null 2>&1; then zenity --info --text="$1"; fi; echo "$1" >&2; }
+pickfile() {   # $1 = title, $2 = filter text
+  if command -v kdialog >/dev/null 2>&1; then kdialog --title "$1" --getopenfilename "$HOME" "$2"
+  elif command -v zenity >/dev/null 2>&1; then zenity --file-selection --title="$1"
+  fi; }
+pickdir() {
+  if command -v kdialog >/dev/null 2>&1; then kdialog --title "$1" --getexistingdirectory "$HOME"
+  elif command -v zenity >/dev/null 2>&1; then zenity --file-selection --directory --title="$1"
+  fi; }
+
+if [ ! -f "$DATA/game.apk" ]; then
+  apk=""
+  [ -n "$BESIDE" ] && apk="$(ls "$BESIDE"/*.apk 2>/dev/null | head -n 1)"
+  [ -z "$apk" ] && apk="$(pickfile 'Select your Caligo Chaser APK' '*.apk')"
+  if [ -z "$apk" ] || [ ! -f "$apk" ]; then say "Caligo Chaser DX needs your own copy of the game's APK.
+Place it next to this AppImage, or run again and pick it."; exit 1; fi
+  cp "$apk" "$DATA/game.apk" || { say "Could not copy the APK."; exit 1; }
+fi
+
+if [ ! -d "$DATA/Com2uS/com.com2us.caligo" ]; then
+  src=""
+  if [ -n "$BESIDE" ] && [ -d "$BESIDE/Com2uS/com.com2us.caligo" ]; then src="$BESIDE/Com2uS"; fi
+  if [ -z "$src" ]; then
+    d="$(pickdir 'Select the Com2uS folder (the one containing com.com2us.caligo)')"
+    if [ -d "$d/com.com2us.caligo" ]; then src="$d"; elif [ -d "$d/Com2uS/com.com2us.caligo" ]; then src="$d/Com2uS"; fi
+  fi
+  if [ -z "$src" ]; then say "That folder does not contain com.com2us.caligo. Please pick the Com2uS data folder."; exit 1; fi
+  mkdir -p "$DATA/Com2uS" && cp -r "$src/com.com2us.caligo" "$DATA/Com2uS/" || { say "Could not copy the game data."; exit 1; }
+fi
+
+exec "$HERE/usr/bin/CaligoChaserDX" --apk "$DATA/game.apk" --data "$DATA" --save "$DATA/save" "$@"
